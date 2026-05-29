@@ -4,11 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
-  },
+  "dev": "vite",
+  "build": "tsc -b && vite build",
+  "preview": "vite preview",
+  "test": "vitest",
+  "test:run": "vitest run"
+   },
   "dependencies": {
     "@deck.gl/layers": "^9.3.2",
     "@deck.gl/react": "^9.3.2",
