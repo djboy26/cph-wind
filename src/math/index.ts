@@ -104,3 +104,44 @@ export interface LonLat {
   
     return { headwindMs, crosswindMs };
   }
+
+  export interface AlongStreet {
+  /** Compass direction (deg CW from N) the wind flows along this street segment. */
+  angleDeg: number;
+  /** Magnitude of wind component along the street, m/s (always ≥ 0). */
+  magnitudeMs: number;
+}
+
+/**
+ * Project wind onto a street's axis.
+ *
+ * Returns the compass direction the wind is flowing along the street and
+ * its scalar magnitude. The crosswind component is discarded.
+ *
+ * Cyclist interpretation: travelling in the returned `angleDeg` direction
+ * yields a tailwind of `magnitudeMs`. Travelling the opposite way along
+ * the same street yields a headwind of equal magnitude.
+ */
+export function alongStreetWind(
+  streetBearingDeg: number,
+  wind: Wind,
+): AlongStreet {
+  const v = streetLevelWind(wind.speedMs);
+  const thetaTravel = ((wind.directionDeg + 180) % 360) * DEG;
+  const Wx = v * Math.sin(thetaTravel);
+  const Wy = v * Math.cos(thetaTravel);
+
+  const thetaStreet = streetBearingDeg * DEG;
+  const Sx = Math.sin(thetaStreet);
+  const Sy = Math.cos(thetaStreet);
+
+  const alongAB = Wx * Sx + Wy * Sy; // signed: positive = A→B, negative = B→A
+
+  if (alongAB >= 0) {
+    return { angleDeg: streetBearingDeg, magnitudeMs: alongAB };
+  }
+  return {
+    angleDeg: (streetBearingDeg + 180) % 360,
+    magnitudeMs: -alongAB,
+  };
+}

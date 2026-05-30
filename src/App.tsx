@@ -8,8 +8,8 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection } from 'geojson';
 import { useCurrentWind } from './hooks/useCurrentWind';
 import { computeArrows, type ArrowDatum } from './layers/computeArrows';
-import { headwindColor } from './layers/colorMap';
-import { resistance } from './math';
+import { magnitudeColor } from './layers/colorMap';
+import { alongStreetWind } from './math';
 
 const COPENHAGEN = { lat: 55.6761, lon: 12.5683 };
 
@@ -21,7 +21,7 @@ const INITIAL_VIEW_STATE = {
   bearing: 0,
 };
 
-const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
+const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
 export default function App() {
   const {
@@ -53,7 +53,7 @@ export default function App() {
         id: 'roads-baseline',
         data: roads,
         lineWidthMinPixels: 1,
-        getLineColor: [150, 150, 150],
+        getLineColor: [180, 180, 180],
         getLineWidth: 1,
         pickable: false,
       }),
@@ -61,29 +61,31 @@ export default function App() {
 
     if (arrows.length > 0 && windResult) {
       const wind = windResult.wind;
-      //const wind = { speedMs: 10, directionDeg: 0 }; // TEMP: wind FROM north
-      const windTravelDeg = (wind.directionDeg + 180) % 360;
-      const arrowAngle = 90 - windTravelDeg;
 
       result.push(
-        new TextLayer<ArrowDatum>({
-          id: 'wind-arrows',
-          data: arrows,
-          getPosition: (d) => [d.lon, d.lat],
-          getText: () => '→',
-          getSize: 20,
-          getAngle: () => arrowAngle,
-          getColor: (d) => {
-            const { headwindMs } = resistance(d.bearingDeg, wind);
-            const [r, g, b] = headwindColor(headwindMs);
-            return [r, g, b, 220];
-          },
-          characterSet: ['→'],
-          fontFamily: 'sans-serif',
-          billboard: false,
-          pickable: false,
-        }),
-      );
+  new TextLayer<ArrowDatum>({
+    id: 'wind-arrows',
+    data: arrows,
+    getPosition: (d) => [d.lon, d.lat],
+    getText: () => '➤',
+    sizeUnits: 'meters',
+    getSize: 45,
+    sizeMinPixels: 14,
+    sizeMaxPixels: 50,
+    // All arrows point in the global wind travel direction.
+    getAngle: () => 90 - ((wind.directionDeg + 180) % 360),
+    // Color reflects how strongly the wind aligns with THIS street segment.
+    getColor: (d) => {
+      const { magnitudeMs } = alongStreetWind(d.bearingDeg, wind);
+      const [r, g, b] = magnitudeColor(magnitudeMs);
+      return [r, g, b, 255];
+    },
+    characterSet: ['➤'],
+    fontFamily: 'sans-serif',
+    billboard: false,
+    pickable: false,
+  }),
+);
     }
 
     return result;
