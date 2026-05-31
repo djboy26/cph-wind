@@ -4,16 +4,17 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-  "dev": "vite",
-  "build": "tsc -b && vite build",
-  "preview": "vite preview",
-  "test": "vitest",
-  "test:run": "vitest run"
-   },
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
   "dependencies": {
     "@deck.gl/layers": "^9.3.2",
     "@deck.gl/react": "^9.3.2",
     "deck.gl": "^9.3.2",
+    "flatbush": "^4.5.1",
     "maplibre-gl": "^5.24.0",
     "osmtogeojson": "^2.2.12",
     "react": "^19.2.6",

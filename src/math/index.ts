@@ -3,129 +3,78 @@
 // No side effects, no dependencies. All angles in degrees CW from north.
 
 export interface LonLat {
-    lon: number;
-    lat: number;
-  }
-  
-  export interface Wind {
-    /** Wind speed at 10m height in m/s (Open-Meteo's reported value). */
-    speedMs: number;
-    /** Meteorological direction in degrees: the direction the wind blows FROM. */
-    directionDeg: number;
-    /** Optional gust speed in m/s. */
-    gustMs?: number;
-  }
-  
-  export interface SegmentResistance {
-    /**
-     * Wind component along the street A→B direction, in m/s.
-     * Positive = cyclist faces headwind of this magnitude.
-     * Negative = cyclist has tailwind of |value| magnitude.
-     */
-    headwindMs: number;
-    /** Unsigned wind component perpendicular to the street, in m/s. */
-    crosswindMs: number;
-  }
-  
-  const DEG = Math.PI / 180;
-  const RAD = 180 / Math.PI;
-  
-  /**
-   * Empirical correction factor to convert 10m wind to street-level (~1.5m)
-   * wind in a mid-rise European urban environment.
-   *
-   * The log-wind-profile breaks down inside the urban canopy, so we use a
-   * flat scalar rather than a formal boundary-layer formula. Calibrate later
-   * against ground-station data if available.
-   */
-  const URBAN_BL_CORRECTION = 0.6;
-  
-  /**
-   * Bearing from point A to point B, in degrees clockwise from north, range [0, 360).
-   *
-   * Applies a cosine correction at mean latitude to account for meridian
-   * convergence. Accurate to <0.1° for segments under a few km at any latitude.
-   */
-  export function bearing(a: LonLat, b: LonLat): number {
-    const meanLat = ((a.lat + b.lat) / 2) * DEG;
-    const dx = (b.lon - a.lon) * Math.cos(meanLat);
-    const dy = b.lat - a.lat;
-    let theta = Math.atan2(dx, dy) * RAD;
-    if (theta < 0) theta += 360;
-    return theta;
-  }
-  
-  /** Componentwise midpoint of two coordinates. */
-  export function midpoint(a: LonLat, b: LonLat): LonLat {
-    return {
-      lon: (a.lon + b.lon) / 2,
-      lat: (a.lat + b.lat) / 2,
-    };
-  }
-  
-  /** Convert 10m wind speed to approximate street-level wind. */
-  export function streetLevelWind(speed10m: number): number {
-    return speed10m * URBAN_BL_CORRECTION;
-  }
-  
-  /**
-   * Decompose wind into along-street (headwind/tailwind) and across-street
-   * (crosswind) components for a cyclist travelling from A to B along a street
-   * with the given bearing.
-   *
-   * Math:
-   *   Wind travel vector (direction air is going):
-   *     θ_travel = (windDirection + 180) mod 360
-   *     W = v * (sin θ_travel, cos θ_travel)   // (east, north)
-   *   Street unit vector (A→B):
-   *     S = (sin θ_street, cos θ_street)
-   *   Headwind = -(W · S)
-   *     positive when wind opposes travel, negative when wind assists.
-   *   Crosswind = |W × S|  (2D cross product magnitude)
-   *
-   * The wind speed is first corrected from 10m to street level.
-   */
-  export function resistance(
-    streetBearingDeg: number,
-    wind: Wind,
-  ): SegmentResistance {
-    const v = streetLevelWind(wind.speedMs);
-  
-    const thetaTravel = ((wind.directionDeg + 180) % 360) * DEG;
-    const Wx = v * Math.sin(thetaTravel);
-    const Wy = v * Math.cos(thetaTravel);
-  
-    const thetaStreet = streetBearingDeg * DEG;
-    const Sx = Math.sin(thetaStreet);
-    const Sy = Math.cos(thetaStreet);
-  
-    const headwindMs = -(Wx * Sx + Wy * Sy);
-    const crosswindMs = Math.abs(Wx * Sy - Wy * Sx);
-  
-    return { headwindMs, crosswindMs };
-  }
+  lon: number;
+  lat: number;
+}
 
-  export interface AlongStreet {
+export interface Wind {
+  /** Wind speed at 10m height in m/s (Open-Meteo's reported value). */
+  speedMs: number;
+  /** Meteorological direction in degrees: the direction the wind blows FROM. */
+  directionDeg: number;
+  /** Optional gust speed in m/s. */
+  gustMs?: number;
+}
+
+export interface SegmentResistance {
+  /**
+   * Wind component along the street A→B direction, in m/s.
+   * Positive = cyclist faces headwind. Negative = tailwind.
+   */
+  headwindMs: number;
+  /** Unsigned wind component perpendicular to the street, in m/s. */
+  crosswindMs: number;
+}
+
+export interface AlongStreet {
   /** Compass direction (deg CW from N) the wind flows along this street segment. */
   angleDeg: number;
   /** Magnitude of wind component along the street, m/s (always ≥ 0). */
   magnitudeMs: number;
 }
 
+export interface CanyonGeometry {
+  /** Mean adjacent building height, meters. 0 = no buildings nearby. */
+  heightM: number;
+  /** Street width between flanking buildings, meters. */
+  widthM: number;
+}
+
+const DEG = Math.PI / 180;
+const RAD = 180 / Math.PI;
+const URBAN_BL_CORRECTION = 0.6;
+
 /**
- * Project wind onto a street's axis.
- *
- * Returns the compass direction the wind is flowing along the street and
- * its scalar magnitude. The crosswind component is discarded.
- *
- * Cyclist interpretation: travelling in the returned `angleDeg` direction
- * yields a tailwind of `magnitudeMs`. Travelling the opposite way along
- * the same street yields a headwind of equal magnitude.
+ * Bearing from point A to point B, degrees CW from north, range [0, 360).
+ * Applies cos(meanLat) correction for meridian convergence.
  */
-export function alongStreetWind(
-  streetBearingDeg: number,
-  wind: Wind,
-): AlongStreet {
+export function bearing(a: LonLat, b: LonLat): number {
+  const meanLat = ((a.lat + b.lat) / 2) * DEG;
+  const dx = (b.lon - a.lon) * Math.cos(meanLat);
+  const dy = b.lat - a.lat;
+  let theta = Math.atan2(dx, dy) * RAD;
+  if (theta < 0) theta += 360;
+  return theta;
+}
+
+/** Componentwise midpoint of two coordinates. */
+export function midpoint(a: LonLat, b: LonLat): LonLat {
+  return {
+    lon: (a.lon + b.lon) / 2,
+    lat: (a.lat + b.lat) / 2,
+  };
+}
+
+/** Convert 10m wind speed to approximate street-level wind (open-area assumption). */
+export function streetLevelWind(speed10m: number): number {
+  return speed10m * URBAN_BL_CORRECTION;
+}
+
+/**
+ * Decompose wind into headwind (signed, along A→B) and crosswind (unsigned, perpendicular)
+ * components for a cyclist travelling A→B.
+ */
+export function resistance(streetBearingDeg: number, wind: Wind): SegmentResistance {
   const v = streetLevelWind(wind.speedMs);
   const thetaTravel = ((wind.directionDeg + 180) % 360) * DEG;
   const Wx = v * Math.sin(thetaTravel);
@@ -135,13 +84,92 @@ export function alongStreetWind(
   const Sx = Math.sin(thetaStreet);
   const Sy = Math.cos(thetaStreet);
 
-  const alongAB = Wx * Sx + Wy * Sy; // signed: positive = A→B, negative = B→A
+  const headwindMs = -(Wx * Sx + Wy * Sy);
+  const crosswindMs = Math.abs(Wx * Sy - Wy * Sx);
+  return { headwindMs, crosswindMs };
+}
 
+/**
+ * Project wind onto street axis. Returns the compass direction wind flows
+ * along the street and its scalar magnitude. Cyclist interpretation:
+ * travelling in `angleDeg` direction yields a tailwind of `magnitudeMs`.
+ */
+export function alongStreetWind(streetBearingDeg: number, wind: Wind): AlongStreet {
+  const v = streetLevelWind(wind.speedMs);
+  const thetaTravel = ((wind.directionDeg + 180) % 360) * DEG;
+  const Wx = v * Math.sin(thetaTravel);
+  const Wy = v * Math.cos(thetaTravel);
+
+  const thetaStreet = streetBearingDeg * DEG;
+  const Sx = Math.sin(thetaStreet);
+  const Sy = Math.cos(thetaStreet);
+
+  const alongAB = Wx * Sx + Wy * Sy;
   if (alongAB >= 0) {
     return { angleDeg: streetBearingDeg, magnitudeMs: alongAB };
   }
   return {
     angleDeg: (streetBearingDeg + 180) % 360,
     magnitudeMs: -alongAB,
+  };
+}
+
+/**
+ * Apply Soulhac-style urban canyon channeling to modify a regional wind
+ * vector based on the local geometry of a street.
+ *
+ * Wind is decomposed into along-canyon and across-canyon components.
+ * The along component is amplified (channeling speedup); the across
+ * component is attenuated (skimming flow blocks perpendicular flow at
+ * street level). The vector is recombined into a new wind with rotated
+ * direction and modified magnitude.
+ *
+ * - λ = H/W is the canyon aspect ratio.
+ * - λ < 0.1: ambient wind returned unchanged.
+ * - λ ≈ 1.0: ~70% of cross-component blocked, ~20% along-component amplified.
+ * - λ ≥ 2:   cross-component nearly fully blocked.
+ *
+ * Reference: Soulhac, Salizzoni, Cierco, Perkins (2008), Atmos Env 42(31).
+ */
+export function canyonModifiedWind(
+  streetBearingDeg: number,
+  canyon: CanyonGeometry,
+  ambientWind: Wind,
+): Wind {
+  const lambda = canyon.widthM > 0 ? canyon.heightM / canyon.widthM : 0;
+
+  if (lambda < 0.1 || ambientWind.speedMs <= 0) return ambientWind;
+
+  const thetaTravel = ((ambientWind.directionDeg + 180) % 360) * DEG;
+  const Wx = ambientWind.speedMs * Math.sin(thetaTravel);
+  const Wy = ambientWind.speedMs * Math.cos(thetaTravel);
+
+  const thetaStreet = streetBearingDeg * DEG;
+  const Sx = Math.sin(thetaStreet);
+  const Sy = Math.cos(thetaStreet);
+
+  const wAlong = Wx * Sx + Wy * Sy;
+  const wCrossX = Wx - wAlong * Sx;
+  const wCrossY = Wy - wAlong * Sy;
+
+  const alongFactor = 1 + 0.2 * Math.min(lambda, 2);
+  const crossFactor = 1 - 0.7 * (1 - Math.exp(-lambda));
+
+  const modX = wAlong * alongFactor * Sx + wCrossX * crossFactor;
+  const modY = wAlong * alongFactor * Sy + wCrossY * crossFactor;
+
+  const speedMs = Math.sqrt(modX * modX + modY * modY);
+  if (speedMs < 1e-6) {
+    return { speedMs: 0, directionDeg: ambientWind.directionDeg, gustMs: ambientWind.gustMs };
+  }
+
+  const travelDeg = (Math.atan2(modX, modY) * RAD + 360) % 360;
+  const directionDeg = (travelDeg + 180) % 360;
+  const gustScale = speedMs / ambientWind.speedMs;
+
+  return {
+    speedMs,
+    directionDeg,
+    gustMs: ambientWind.gustMs !== undefined ? ambientWind.gustMs * gustScale : undefined,
   };
 }
