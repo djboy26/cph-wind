@@ -1,12 +1,15 @@
 ﻿// src/layers/colorMap.ts
+// Maps wind magnitude (m/s) to RGB. Calibrated for typical urban wind range (0-8 m/s).
+// Gray = sheltered/perpendicular streets. Saturated = wind acting on the street.
+
 export type RGB = [number, number, number];
 
 const STOPS: Array<[number, RGB]> = [
-  [0, [180, 180, 180]],     // gray: street is perpendicular to wind, no along-street effect
-  [1.5, [60, 180, 100]],    // saturated green: mild along-street component
-  [4, [240, 200, 30]],      // yellow: moderate
-  [7, [240, 110, 40]],      // orange: strong
-  [11, [215, 35, 50]],      // red: very strong
+  [0, [200, 200, 200]],     // gray: no along-street wind
+  [0.7, [80, 180, 110]],    // green: mild
+  [2, [240, 200, 30]],      // yellow: noticeable
+  [4, [240, 110, 40]],      // orange: strong
+  [8, [215, 35, 50]],       // red: very strong (gale)
 ];
 
 function lerp(a: number, b: number, t: number): number {

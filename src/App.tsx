@@ -9,6 +9,8 @@ import type { FeatureCollection } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
 import { magnitudeColor } from "./layers/colorMap";
 import { canyonModifiedWind } from "./math";
+import WindCard from "./components/WindCard";
+import Legend from "./components/Legend";
 
 interface Segment {
   wayId: string | number | undefined;
@@ -123,50 +125,53 @@ export default function App() {
     return result;
   }, [roads, segmentsWithWind]);
 
+  const stillLoading = !roads || !segments;
+  const showWindError = windError && !windResult; // suppress transient refresh errors if we have data
+  const showDataError = dataError && stillLoading;
+
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
       <DeckGL initialViewState={INITIAL_VIEW_STATE} controller={true} layers={layers}>
         <Map reuseMaps mapStyle={MAP_STYLE} />
       </DeckGL>
 
-      <div
-        style={{
-          position: "absolute",
-          top: 12,
-          left: 12,
-          padding: "8px 12px",
-          background: "rgba(255,255,255,0.92)",
-          borderRadius: 6,
-          fontFamily: "system-ui",
-          fontSize: 13,
-          color: "#222",
-          pointerEvents: "none",
-          maxWidth: 320,
-          boxShadow: "0 1px 3px rgba(0,0,0,0.15)",
-        }}
-      >
-        {dataError && <div style={{ color: "#c00" }}>Data error: {dataError.message}</div>}
-        {windError && <div style={{ color: "#c00" }}>Wind error: {windError.message}</div>}
-        {(!roads || !segments) && !dataError && <div>Loading streets…</div>}
-        {windLoading && !windResult && <div>Loading wind…</div>}
-        {windResult && (
-          <div>
-            <strong>Copenhagen — ambient wind</strong>
-            <br />
-            {windResult.wind.speedMs.toFixed(1)} m/s from {Math.round(windResult.wind.directionDeg)}°
-            {windResult.wind.gustMs !== undefined && (
-              <>
-                <br />
-                Gusts: {windResult.wind.gustMs.toFixed(1)} m/s
-              </>
-            )}
-            <br />
-            <span style={{ fontSize: 11, color: "#555" }}>
-              Arrows show canyon-modified wind per street ({segmentsWithWind.length} segments).
-            </span>
+      {/* Top-right: live wind card */}
+      <div style={{ position: "absolute", top: 16, right: 16 }}>
+        {showDataError && (
+          <div style={{ background: "white", color: "#c00", padding: "8px 12px", borderRadius: 6 }}>
+            Data error: {dataError!.message}
           </div>
         )}
+        {showWindError && (
+          <div style={{ background: "white", color: "#c00", padding: "8px 12px", borderRadius: 6 }}>
+            Wind error: {windError!.message}
+          </div>
+        )}
+        {stillLoading && !dataError && (
+          <div style={{ background: "white", color: "#444", padding: "8px 12px", borderRadius: 6, fontFamily: "system-ui" }}>
+            Loading streets…
+          </div>
+        )}
+        {windLoading && !windResult && !stillLoading && (
+          <div style={{ background: "white", color: "#444", padding: "8px 12px", borderRadius: 6, fontFamily: "system-ui" }}>
+            Loading wind…
+          </div>
+        )}
+        {windResult && !stillLoading && (
+          <WindCard
+            wind={windResult.wind}
+            timestamp={windResult.timestamp}
+            segmentCount={segmentsWithWind.length}
+          />
+        )}
       </div>
+
+      {/* Bottom-right: legend */}
+      {windResult && !stillLoading && (
+        <div style={{ position: "absolute", bottom: 16, right: 16 }}>
+          <Legend />
+        </div>
+      )}
     </div>
   );
 }
