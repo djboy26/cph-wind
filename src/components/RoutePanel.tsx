@@ -33,10 +33,10 @@ function fmtMin(s: number) {
 }
 function windDeltaLabel(deltaS: number) {
   const m = Math.abs(deltaS) / 60;
-  if (m < 0.5) return { text: "wind neutral", color: "#666" };
+  if (m < 0.2) return { text: "wind neutral", color: "#666" };
   return deltaS < 0
-    ? { text: `saves ${m.toFixed(0)}–${Math.ceil(m)} min`, color: "#1a7f37" }
-    : { text: `costs ${m.toFixed(0)}–${Math.ceil(m)} min`, color: "#b5480f" };
+    ? { text: `wind saves ${m.toFixed(1)} min`, color: "#1a7f37" }
+    : { text: `wind costs ${m.toFixed(1)} min`, color: "#b5480f" };
 }
 function headLabel(avgHeadwindMs: number) {
   if (avgHeadwindMs > 0.3) return `${avgHeadwindMs.toFixed(1)} m/s headwind`;
