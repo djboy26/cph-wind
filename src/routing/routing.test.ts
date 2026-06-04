@@ -130,12 +130,11 @@ describe('wind cost', () => {
 });
 
 describe('planRoutes', () => {
-  it('returns ranked options with exactly one best-wind flag', () => {
+  it('ranks by wind favourability (least wind penalty first) with one best-wind flag', () => {
     const opts = planRoutes(G, node(0, 0), node(2, 2), { speedMs: 8, directionDeg: 0 });
     expect(opts.length).toBeGreaterThan(0);
-    // sorted ascending by wind-adjusted time
     for (let i = 1; i < opts.length; i++) {
-      expect(opts[i].metrics.timeS).toBeGreaterThanOrEqual(opts[i - 1].metrics.timeS);
+      expect(opts[i].metrics.windDeltaS).toBeGreaterThanOrEqual(opts[i - 1].metrics.windDeltaS);
     }
     expect(opts.filter((o) => o.bestWind).length).toBe(1);
     expect(opts[0].bestWind).toBe(true);
@@ -144,5 +143,47 @@ describe('planRoutes', () => {
 
   it('returns [] when start equals goal', () => {
     expect(planRoutes(G, node(1, 1), node(1, 1), { speedMs: 5, directionDeg: 0 })).toEqual([]);
+  });
+
+  // Regression: "best for wind" must be the route the wind treats best, NOT the
+  // fastest/shortest. Here a direct crosswind route should beat a longer detour
+  // that goes into a headwind (then back with a tailwind).
+  it('flags the low-headwind route as best, not the most-into-wind one', () => {
+    const lon = (i: number) => 12.5 + i * 0.002;
+    const lat = (j: number) => 55.68 + j * 0.002;
+    const line = (id: string, pts: [number, number][]) => ({
+      type: 'Feature' as const,
+      properties: { id, highway: 'residential' },
+      geometry: { type: 'LineString' as const, coordinates: pts.map(([i, j]) => [lon(i), lat(j)]) },
+    });
+    // A=(0,0) → B=(0,2). Direct = straight north (crosswind). Detour dips east,
+    // up, and back west — its east leg goes into the wind.
+    const fc: FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [
+        line('direct', [[0, 0], [0, 1], [0, 2]]),
+        line('bottom', [[0, 0], [1, 0]]),
+        line('rightcol', [[1, 0], [1, 1], [1, 2]]),
+        line('top', [[1, 2], [0, 2]]),
+      ],
+    };
+    const g = buildGraph(fc);
+    const A = nearestNode(g, lon(0), lat(0));
+    const B = nearestNode(g, lon(0), lat(2));
+    // Strong wind from the east (blows west): north travel is crosswind, the
+    // detour's east leg is a headwind.
+    const opts = planRoutes(g, A, B, { speedMs: 10, directionDeg: 90 });
+
+    expect(opts.length).toBeGreaterThanOrEqual(2);
+    const best = opts.find((o) => o.bestWind)!;
+    // The best-wind route must have the LEAST into-wind exposure of all options…
+    for (const o of opts) {
+      expect(best.metrics.headwindExposure).toBeLessThanOrEqual(o.metrics.headwindExposure + 1e-9);
+    }
+    // …and the detour (more into-wind) must NOT be flagged best.
+    const mostIntoWind = [...opts].sort((a, b) => b.metrics.headwindExposure - a.metrics.headwindExposure)[0];
+    if (mostIntoWind.metrics.headwindExposure > best.metrics.headwindExposure) {
+      expect(mostIntoWind.bestWind).toBe(false);
+    }
   });
 });

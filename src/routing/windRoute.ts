@@ -113,8 +113,9 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 
 /**
  * Generate, annotate, and rank A→B route options for the given live wind.
- * Returns options sorted by wind-adjusted time (best first); the fastest is
- * flagged `bestWind`. Returns [] if no path exists.
+ * Returns options sorted by how favourable the wind is (least headwind first);
+ * the most wind-favourable is flagged `bestWind`. Each option keeps its full
+ * metrics so the rider can trade wind off against distance/time. [] if no path.
  */
 export function planRoutes(
   g: RoutingGraph,
@@ -155,7 +156,13 @@ export function planRoutes(
     bestWind: false,
   }));
 
-  options.sort((a, b) => a.metrics.timeS - b.metrics.timeS);
+  // "Best for wind" = the route the wind treats best: the smallest wind time
+  // penalty (windDeltaS = time the wind costs(+)/saves(−)), independent of route
+  // length. Crosswind contributes ~0, headwind costs, tailwind saves — so this is
+  // not foolable by detours and matches the "saves/costs X min" shown per route.
+  // (Ranking by total wind-adjusted TIME instead would just pick the shortest
+  // route, since distance dominates — that is NOT "best wind-wise".)
+  options.sort((a, b) => a.metrics.windDeltaS - b.metrics.windDeltaS);
   if (options.length > 0) options[0].bestWind = true;
   return options;
 }
