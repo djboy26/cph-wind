@@ -216,6 +216,14 @@ const MODELS = [
 // ---------- Main ----------
 
 async function main() {
+  // Read-only verdict from accumulated data — no network, no log changes.
+  // Safe to run locally anytime (`node scripts/validate-wind.mjs --report`),
+  // unlike a normal run which the cloud owns.
+  if (process.argv.includes("--report")) {
+    await printAggregate();
+    return;
+  }
+
   console.log("Fetching live observations…");
   const obs = [...(await fetchMetar()), ...(await fetchDmi())];
   if (obs.length === 0) {
@@ -335,6 +343,20 @@ async function printAggregate() {
     );
   }
   console.log("(bias: + = model too windy vs obs)");
+
+  // ---- Plain-English verdict for the model with the most samples ----
+  const primary = [...byModel.entries()].sort((a, b) => b[1].length - a[1].length)[0];
+  if (primary) {
+    const [name, rows] = primary;
+    const s = statsFor(rows);
+    const verdict = s.n < 30 ? "TOO FEW SAMPLES to trust yet" :
+      s.mae < 1.2 && (s.dirMae ?? 99) < 25 ? "GOOD agreement with real observations" :
+      s.mae < 2 && (s.dirMae ?? 99) < 45 ? "FAIR agreement" : "POOR agreement — investigate";
+    console.log(`\nPlain reading — ${name} (${s.n} samples): ${verdict}.`);
+    console.log(`  The base wind was on average within ${s.mae.toFixed(1)} m/s and ` +
+      `${s.dirMae == null ? "?" : s.dirMae.toFixed(0) + "°"} of real observations,`);
+    console.log(`  and matched the cyclist wind category ${(s.catAgree * 100).toFixed(0)}% of the time.`);
+  }
 
   // ---- Regime coverage over distinct observations (model-independent) ----
   const seenObs = new Set();
