@@ -2,20 +2,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fetchCurrentWind } from './weather';
 
+// MET Norway Locationforecast (compact) response shape.
 const MOCK_RESPONSE = {
-  latitude: 55.68,
-  longitude: 12.56,
-  elevation: 5,
-  current_units: {
-    wind_speed_10m: 'm/s',
-    wind_direction_10m: '°',
-    wind_gusts_10m: 'm/s',
-  },
-  current: {
-    time: '2026-05-29T17:00',
-    wind_speed_10m: 4.2,
-    wind_direction_10m: 245,
-    wind_gusts_10m: 7.8,
+  type: 'Feature',
+  geometry: { type: 'Point', coordinates: [12.56, 55.68, 5] }, // [lon, lat, alt]
+  properties: {
+    timeseries: [
+      {
+        time: '2026-06-04T12:00:00Z',
+        data: {
+          instant: {
+            details: {
+              wind_speed: 4.2,
+              wind_from_direction: 245,
+              wind_speed_of_gust: 7.8,
+            },
+          },
+        },
+      },
+    ],
   },
 };
 
@@ -28,7 +33,7 @@ describe('fetchCurrentWind', () => {
     vi.unstubAllGlobals();
   });
 
-  it('parses Open-Meteo response into Wind shape', async () => {
+  it('parses MET Norway response into Wind shape', async () => {
     (globalThis.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => MOCK_RESPONSE,
@@ -41,7 +46,7 @@ describe('fetchCurrentWind', () => {
       directionDeg: 245,
       gustMs: 7.8,
     });
-    expect(result.timestamp).toBe('2026-05-29T17:00');
+    expect(result.timestamp).toBe('2026-06-04T12:00:00Z');
     expect(result.source).toEqual({ lat: 55.68, lon: 12.56, elevationM: 5 });
   });
 
@@ -55,16 +60,16 @@ describe('fetchCurrentWind', () => {
     await expect(fetchCurrentWind(55.68, 12.56)).rejects.toThrow(/503/);
   });
 
-  it('throws when response is missing the current object', async () => {
+  it('throws when response is missing the timeseries', async () => {
     (globalThis.fetch as any).mockResolvedValue({
       ok: true,
-      json: async () => ({ latitude: 55, longitude: 12 }),
+      json: async () => ({ type: 'Feature', properties: {} }),
     });
 
-    await expect(fetchCurrentWind(55.68, 12.56)).rejects.toThrow(/current/);
+    await expect(fetchCurrentWind(55.68, 12.56)).rejects.toThrow(/timeseries/);
   });
 
-  it('builds the correct URL with all required parameters', async () => {
+  it('builds the correct MET Norway URL', async () => {
     (globalThis.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => MOCK_RESPONSE,
@@ -73,9 +78,8 @@ describe('fetchCurrentWind', () => {
     await fetchCurrentWind(55.68, 12.56);
 
     const callUrl = (globalThis.fetch as any).mock.calls[0][0];
-    expect(callUrl).toContain('latitude=55.68');
-    expect(callUrl).toContain('longitude=12.56');
-    expect(callUrl).toContain('wind_speed_unit=ms');
-    expect(callUrl).toContain('current=wind_speed_10m');
+    expect(callUrl).toContain('api.met.no');
+    expect(callUrl).toContain('lat=55.6800');
+    expect(callUrl).toContain('lon=12.5600');
   });
 });
