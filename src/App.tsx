@@ -2,7 +2,7 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import DeckGL from "@deck.gl/react";
-import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { PathLayer, ScatterplotLayer, PolygonLayer } from "@deck.gl/layers";
 import { WebMercatorViewport } from "@deck.gl/core";
 import { Map as MapLibreMap } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -32,6 +32,9 @@ const statusChip = (color: string): React.CSSProperties => ({
 
 interface LatLon { lat: number; lon: number; }
 
+// One row of the slim buildings file: [heightM, outerRing as [lon,lat] pairs].
+type BuildingRow = [number, [number, number][]];
+
 interface HoverState {
   x: number;
   y: number;
@@ -47,6 +50,9 @@ const MOBILE_BREAKPOINT = 768;
 const GCPH = { minLon: 12.34, maxLon: 12.78, minLat: 55.54, maxLat: 55.82 };
 const MIN_ZOOM = 11;
 const MAX_ZOOM = 18.5;
+// 3D buildings: only fetch/render once the rider zooms in past the city overview
+// (the slim file is ~42 MB, so we load it lazily, not on first paint).
+const BUILDINGS_MIN_ZOOM = 14;
 const clampN = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 function constrainView<T extends { longitude?: number; latitude?: number; zoom?: number }>(vs: T): T {
   return {
@@ -160,6 +166,8 @@ function MapApp() {
 
   const [roads, setRoads] = useState<FeatureCollection | null>(null);
   const [segments, setSegments] = useState<RawSegment[] | null>(null);
+  const [buildings, setBuildings] = useState<BuildingRow[] | null>(null);
+  const buildingsReq = useRef(false);
   const [dataError, setDataError] = useState<Error | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
   const [pinned, setPinned] = useState<HoverState | null>(null);
@@ -239,6 +247,18 @@ function MapApp() {
       .catch(setDataError);
   }, []);
 
+  // Lazily pull the ~42 MB 3D-buildings file the first time the rider zooms in far
+  // enough to see extrusions — never on first paint, so the map opens fast.
+  const wantBuildings = !!roads && (viewState.zoom ?? 0) >= BUILDINGS_MIN_ZOOM;
+  useEffect(() => {
+    if (!wantBuildings || buildingsReq.current) return;
+    buildingsReq.current = true;
+    fetch("/data/cph-buildings-slim.json")
+      .then((r) => { if (!r.ok) throw new Error(`Buildings ${r.status}`); return r.json(); })
+      .then((b: BuildingRow[]) => setBuildings(b))
+      .catch((e) => { console.warn("3D buildings failed to load:", e); buildingsReq.current = false; });
+  }, [wantBuildings]);
+
   const wayNames = useMemo(() => {
     if (!roads) return new Map<string, string>();
     const m = new Map<string, string>();
@@ -314,6 +334,18 @@ function MapApp() {
     return buildWindArrows(visible, windResult.wind, density);
   }, [enrichedSegments, windResult, density, boundsKey]);
 
+  // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
+  // footprints would choke the GPU. boundsKey already snaps to a coarse grid, so
+  // this re-filters only when the view moves a meaningful amount.
+  const visibleBuildings = useMemo(() => {
+    if (!buildings || !boundsKey || (viewState.zoom ?? 0) < BUILDINGS_MIN_ZOOM) return null;
+    const [west, south, east, north] = boundsKey.split(",").map(Number);
+    return buildings.filter((b) => {
+      const [lon, lat] = b[1][0];
+      return lon >= west && lon <= east && lat >= south && lat <= north;
+    });
+  }, [buildings, boundsKey, viewState.zoom]);
+
   const onViewStateChange = useCallback(({ viewState: vs }: { viewState: Record<string, unknown> }) => {
     setViewState(constrainView(vs as typeof viewState));
   }, []);
@@ -323,6 +355,23 @@ function MapApp() {
     // The dark basemap already draws the road network, so no baseline overlay —
     // cleaner and faster (no 24k extra lines).
     const result: any[] = [];
+    // 3D building extrusions sit at the bottom of the stack so wind arrows and
+    // routes always draw on top of them.
+    if (visibleBuildings && visibleBuildings.length > 0) {
+      result.push(
+        new PolygonLayer<BuildingRow>({
+          id: "buildings",
+          data: visibleBuildings,
+          extruded: true,
+          getPolygon: (d) => d[1],
+          getElevation: (d) => d[0],
+          getFillColor: [42, 48, 60, 235],
+          stroked: false,
+          material: { ambient: 0.55, diffuse: 0.6, shininess: 24, specularColor: [50, 60, 80] },
+          pickable: false,
+        }),
+      );
+    }
     if (windArrows.length > 0) {
       result.push(
         createWindFlowLayer({
@@ -386,7 +435,7 @@ function MapApp() {
       );
     }
     return result;
-  }, [roads, windArrows, flowPhase, isMobile, routing, rankedRoutes, selectedRoute, bestId, start, end]);
+  }, [roads, visibleBuildings, windArrows, flowPhase, isMobile, routing, rankedRoutes, selectedRoute, bestId, start, end]);
 
   const stillLoading = !roads || !segments;
   const showWindError = windError && !windResult;
