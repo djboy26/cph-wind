@@ -13,12 +13,14 @@ import { arrowDensityForZoom, buildWindArrows, roadWidthForHighway, type RawSegm
 import { createWindFlowLayer, type WindArrowInstance } from "./layers/WindFlowLayer";
 import { buildGraph, nearestNode } from "./routing/graph";
 import { planRoutes, rankRoutes, type RouteOption, type RankCriterion } from "./routing/windRoute";
-import WindCard from "./components/Windcard";
+import TopBar from "./components/TopBar";
 import Legend from "./components/Legend";
 import SegmentTooltip from "./components/SegmentTooltip";
 import RoutePanel from "./components/RoutePanel";
 import About from "./components/About";
+import OnboardingHint from "./components/OnboardingHint";
 import { glass, COLORS } from "./components/ui";
+import "./components/ui.css";
 
 const statusChip = (color: string): React.CSSProperties => ({
   ...glass,
@@ -170,6 +172,7 @@ function MapApp() {
   const [criterion, setCriterion] = useState<RankCriterion>("recommended");
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   // Build the routing graph once, the first time route planning is opened; cached
   // thereafter (routeReady stays true, so toggling the panel never rebuilds it).
@@ -403,18 +406,15 @@ function MapApp() {
     if (!info.layer) setPinned(null);
   }, [routing, start, end]);
 
-  const topCardStyle: React.CSSProperties = isMobile
-    ? { position: "absolute", top: 8, left: 8, right: 8 }
-    : { position: "absolute", top: 16, right: 16 };
+  const routeDrawerStyle: React.CSSProperties = isMobile
+    ? { position: "absolute", bottom: 8, left: 8, right: 8, zIndex: 25 }
+    : { position: "absolute", top: 78, left: 14, zIndex: 25 };
   const legendStyle: React.CSSProperties = isMobile
-    ? { position: "absolute", bottom: pinned ? 200 : 8, left: 8, right: 8 }
-    : { position: "absolute", bottom: 16, right: 16 };
-  const routePanelStyle: React.CSSProperties = isMobile
-    ? { position: "absolute", bottom: 8, left: 8, right: 8, zIndex: 20 }
-    : { position: "absolute", top: 16, left: 16, zIndex: 20 };
+    ? { position: "absolute", bottom: pinned ? 200 : 10, left: 10, zIndex: 20 }
+    : { position: "absolute", bottom: 16, right: 16, zIndex: 20 };
 
   return (
-    <div style={{ position: "relative", width: "100vw", height: "100vh", background: "#0e0f13" }}>
+    <div style={{ position: "relative", width: "100vw", height: "100vh", background: "#0e0f13", overflow: "hidden" }}>
       <DeckGL
         initialViewState={initialViewState}
         viewState={viewState}
@@ -427,54 +427,54 @@ function MapApp() {
         <MapLibreMap reuseMaps mapStyle={MAP_STYLE} />
       </DeckGL>
 
-      <div style={routePanelStyle}>
-        <RoutePanel
-          active={routing}
-          onToggle={toggleRouting}
-          start={start}
-          end={end}
-          building={routing && !graph}
-          gpsLoading={gpsLoading}
-          gpsError={gpsError}
-          onUseGps={useGps}
-          onReset={resetRoute}
-          options={rankedRoutes}
-          bestId={bestId}
-          selectedId={selectedRoute?.id ?? null}
-          onSelect={setSelectedRouteId}
-          criterion={criterion}
-          onCriterion={setCriterion}
-          isMobile={isMobile}
-        />
+      <TopBar
+        wind={windResult?.wind ?? null}
+        timestamp={windResult?.timestamp}
+        loading={windLoading && !windResult}
+        routingActive={routing}
+        onPlanRoute={toggleRouting}
+        onAbout={() => setAboutOpen(true)}
+        isMobile={isMobile}
+      />
+
+      {/* Transient status chips, centered just under the bar */}
+      <div style={{ position: "absolute", top: isMobile ? 58 : 76, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 8, zIndex: 20, pointerEvents: "none" }}>
+        {showDataError && <div className="ui-fade" style={statusChip(COLORS.bad)}>Data error: {dataError!.message}</div>}
+        {showWindError && <div className="ui-fade" style={statusChip(COLORS.bad)}>Wind error: {windError!.message}</div>}
+        {stillLoading && !dataError && <div className="ui-fade" style={statusChip(COLORS.dim)}>Loading streets…</div>}
+        {windLoading && !windResult && !stillLoading && <div className="ui-fade" style={statusChip(COLORS.dim)}>Loading wind…</div>}
       </div>
 
-      <div style={topCardStyle}>
-        {showDataError && (
-          <div style={statusChip(COLORS.bad)}>Data error: {dataError!.message}</div>
-        )}
-        {showWindError && (
-          <div style={statusChip(COLORS.bad)}>Wind error: {windError!.message}</div>
-        )}
-        {stillLoading && !dataError && (
-          <div style={statusChip(COLORS.dim)}>Loading streets…</div>
-        )}
-        {windLoading && !windResult && !stillLoading && (
-          <div style={statusChip(COLORS.dim)}>Loading wind…</div>
-        )}
-        {windResult && !stillLoading && (
-          <WindCard
-            wind={windResult.wind}
-            timestamp={windResult.timestamp}
-            segmentCount={segments!.length}
+      {routing && (
+        <div className={isMobile ? "ui-sheet" : "ui-left"} style={routeDrawerStyle}>
+          <RoutePanel
+            active={routing}
+            onToggle={toggleRouting}
+            start={start}
+            end={end}
+            building={routing && !graph}
+            gpsLoading={gpsLoading}
+            gpsError={gpsError}
+            onUseGps={useGps}
+            onReset={resetRoute}
+            options={rankedRoutes}
+            bestId={bestId}
+            selectedId={selectedRoute?.id ?? null}
+            onSelect={setSelectedRouteId}
+            criterion={criterion}
+            onCriterion={setCriterion}
+            isMobile={isMobile}
           />
-        )}
-      </div>
+        </div>
+      )}
 
       {windResult && !stillLoading && !(routing && isMobile) && (
         <div style={legendStyle}>
-          <Legend />
+          <Legend isMobile={isMobile} />
         </div>
       )}
+
+      {!stillLoading && <OnboardingHint isMobile={isMobile} />}
 
       {activeTip && (
         <SegmentTooltip
@@ -496,7 +496,7 @@ function MapApp() {
         />
       )}
 
-      <About />
+      <About open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </div>
   );
 }

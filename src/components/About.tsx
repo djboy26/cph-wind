@@ -1,44 +1,20 @@
 // src/components/About.tsx
-// Methodology + attribution modal. Toggled by a small "i" button in the corner.
+// Methodology + attribution modal (controlled; trigger lives in the top bar).
 
-import { useState } from "react";
 import { glass, COLORS, FONT } from "./ui";
 
 const link: React.CSSProperties = { color: COLORS.accent, textDecoration: "none" };
 const h3: React.CSSProperties = { fontSize: 15, marginTop: 18, marginBottom: 6, color: COLORS.text };
 
-export default function About() {
-  const [open, setOpen] = useState(false);
+export default function About({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
 
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        aria-label="About this map"
-        style={{
-          ...glass,
-          position: "absolute",
-          bottom: 16,
-          left: 16,
-          width: 34,
-          height: 34,
-          borderRadius: "50%",
-          cursor: "pointer",
-          fontSize: 16,
-          fontFamily: "Georgia, serif",
-          fontStyle: "italic",
-          fontWeight: 700,
-          color: COLORS.text,
-          zIndex: 20,
-          padding: 0,
-        }}
-      >
-        i
-      </button>
-
-      {open && (
+      {(
         <div
-          onClick={() => setOpen(false)}
+          className="ui-fade"
+          onClick={onClose}
           style={{
             position: "fixed",
             inset: 0,
@@ -53,6 +29,7 @@ export default function About() {
           }}
         >
           <div
+            className="ui-up thin-scroll"
             onClick={(e) => e.stopPropagation()}
             style={{
               ...glass,
@@ -67,7 +44,7 @@ export default function About() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 12 }}>
               <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: COLORS.text }}>Copenhagen Wind</h2>
               <button
-                onClick={() => setOpen(false)}
+                onClick={onClose}
                 aria-label="Close"
                 style={{ border: "none", background: "transparent", fontSize: 24, cursor: "pointer", color: COLORS.dim, lineHeight: 1, padding: 0, fontFamily: FONT }}
               >×</button>
