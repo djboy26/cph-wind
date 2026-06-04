@@ -2,7 +2,7 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import DeckGL from "@deck.gl/react";
-import { GeoJsonLayer, PathLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { WebMercatorViewport } from "@deck.gl/core";
 import { Map as MapLibreMap } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -18,6 +18,15 @@ import Legend from "./components/Legend";
 import SegmentTooltip from "./components/SegmentTooltip";
 import RoutePanel from "./components/RoutePanel";
 import About from "./components/About";
+import { glass, COLORS } from "./components/ui";
+
+const statusChip = (color: string): React.CSSProperties => ({
+  ...glass,
+  padding: "8px 14px",
+  borderRadius: 12,
+  fontSize: 13,
+  color,
+});
 
 interface LatLon { lat: number; lon: number; }
 
@@ -28,8 +37,23 @@ interface HoverState {
 }
 
 const COPENHAGEN = { lat: 55.6761, lon: 12.5683 };
-const MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const MAP_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 const MOBILE_BREAKPOINT = 768;
+
+// Hard-lock the camera to Greater Copenhagen (data bounds + a little padding) so
+// the map can never wander off to another city or country.
+const GCPH = { minLon: 12.34, maxLon: 12.78, minLat: 55.54, maxLat: 55.82 };
+const MIN_ZOOM = 11;
+const MAX_ZOOM = 18.5;
+const clampN = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+function constrainView<T extends { longitude?: number; latitude?: number; zoom?: number }>(vs: T): T {
+  return {
+    ...vs,
+    longitude: clampN(vs.longitude ?? COPENHAGEN.lon, GCPH.minLon, GCPH.maxLon),
+    latitude: clampN(vs.latitude ?? COPENHAGEN.lat, GCPH.minLat, GCPH.maxLat),
+    zoom: clampN(vs.zoom ?? 12, MIN_ZOOM, MAX_ZOOM),
+  };
+}
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(
@@ -121,8 +145,8 @@ function MapApp() {
   const initialViewState = useMemo(() => ({
     longitude: COPENHAGEN.lon,
     latitude: COPENHAGEN.lat,
-    zoom: isMobile ? 13 : 12,
-    pitch: isMobile ? 0 : 45,
+    zoom: isMobile ? 13 : 13.5, // arrows appear from zoom 13 — open already showing wind
+    pitch: isMobile ? 0 : 40,
     bearing: 0,
   }), [isMobile]);
 
@@ -288,21 +312,14 @@ function MapApp() {
   }, [enrichedSegments, windResult, density, boundsKey]);
 
   const onViewStateChange = useCallback(({ viewState: vs }: { viewState: Record<string, unknown> }) => {
-    setViewState(vs as typeof viewState);
+    setViewState(constrainView(vs as typeof viewState));
   }, []);
 
   const layers = useMemo(() => {
     if (!roads) return [];
-    const result: any[] = [
-      new GeoJsonLayer({
-        id: "roads-baseline",
-        data: roads,
-        lineWidthMinPixels: 1,
-        getLineColor: [120, 120, 120],
-        getLineWidth: 1,
-        pickable: false,
-      }),
-    ];
+    // The dark basemap already draws the road network, so no baseline overlay —
+    // cleaner and faster (no 24k extra lines).
+    const result: any[] = [];
     if (windArrows.length > 0) {
       result.push(
         createWindFlowLayer({
@@ -330,9 +347,9 @@ function MapApp() {
           data: ordered,
           getPath: (o) => o.coords,
           getColor: (o) =>
-            o.id === selectedRoute?.id ? [30, 120, 240, 255]
-            : o.id === bestId ? [40, 160, 90, 220]
-            : [130, 140, 150, 170],
+            o.id === selectedRoute?.id ? [70, 150, 255, 255]
+            : o.id === bestId ? [70, 209, 138, 235]
+            : [165, 174, 186, 190],
           getWidth: (o) => (o.id === selectedRoute?.id ? 7 : 4),
           widthUnits: "pixels",
           widthMinPixels: 3,
@@ -397,7 +414,7 @@ function MapApp() {
     : { position: "absolute", top: 16, left: 16, zIndex: 20 };
 
   return (
-    <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
+    <div style={{ position: "relative", width: "100vw", height: "100vh", background: "#0e0f13" }}>
       <DeckGL
         initialViewState={initialViewState}
         viewState={viewState}
@@ -433,24 +450,16 @@ function MapApp() {
 
       <div style={topCardStyle}>
         {showDataError && (
-          <div style={{ background: "white", color: "#c00", padding: "8px 12px", borderRadius: 6 }}>
-            Data error: {dataError!.message}
-          </div>
+          <div style={statusChip(COLORS.bad)}>Data error: {dataError!.message}</div>
         )}
         {showWindError && (
-          <div style={{ background: "white", color: "#c00", padding: "8px 12px", borderRadius: 6 }}>
-            Wind error: {windError!.message}
-          </div>
+          <div style={statusChip(COLORS.bad)}>Wind error: {windError!.message}</div>
         )}
         {stillLoading && !dataError && (
-          <div style={{ background: "white", color: "#444", padding: "8px 12px", borderRadius: 6, fontFamily: "system-ui" }}>
-            Loading streets…
-          </div>
+          <div style={statusChip(COLORS.dim)}>Loading streets…</div>
         )}
         {windLoading && !windResult && !stillLoading && (
-          <div style={{ background: "white", color: "#444", padding: "8px 12px", borderRadius: 6, fontFamily: "system-ui" }}>
-            Loading wind…
-          </div>
+          <div style={statusChip(COLORS.dim)}>Loading wind…</div>
         )}
         {windResult && !stillLoading && (
           <WindCard

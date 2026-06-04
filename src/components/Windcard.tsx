@@ -1,5 +1,6 @@
 // src/components/WindCard.tsx
 import type { Wind } from '../math';
+import { glass, COLORS } from './ui';
 
 interface Props {
   wind: Wind;
@@ -20,18 +21,18 @@ function Compass({ directionDeg, size = 64 }: { directionDeg: number; size?: num
 
   return (
     <svg width={size} height={size} aria-label="Wind compass">
-      <circle cx={cx} cy={cy} r={r} fill="#fafafa" stroke="#ccc" strokeWidth={1} />
-      <text x={cx} y={9} textAnchor="middle" fontSize={9} fill="#666" fontWeight="600">N</text>
-      <text x={size - 4} y={cy + 4} textAnchor="middle" fontSize={9} fill="#888">E</text>
-      <text x={cx} y={size - 2} textAnchor="middle" fontSize={9} fill="#888">S</text>
-      <text x={5} y={cy + 4} textAnchor="middle" fontSize={9} fill="#888">W</text>
+      <circle cx={cx} cy={cy} r={r} fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.16)" strokeWidth={1} />
+      <text x={cx} y={10} textAnchor="middle" fontSize={9} fill={COLORS.dim} fontWeight="700">N</text>
+      <text x={size - 5} y={cy + 4} textAnchor="middle" fontSize={9} fill={COLORS.faint}>E</text>
+      <text x={cx} y={size - 3} textAnchor="middle" fontSize={9} fill={COLORS.faint}>S</text>
+      <text x={6} y={cy + 4} textAnchor="middle" fontSize={9} fill={COLORS.faint}>W</text>
       <g transform={`rotate(${directionDeg} ${cx} ${cy})`}>
-        <line x1={cx} y1={cy} x2={cx} y2={cy - r + 8} stroke="#c33" strokeWidth={2.5} strokeLinecap="round" />
+        <line x1={cx} y1={cy} x2={cx} y2={cy - r + 8} stroke="#ff6b6b" strokeWidth={2.5} strokeLinecap="round" />
         <polygon
           points={`${cx - 4},${cy - r + 12} ${cx + 4},${cy - r + 12} ${cx},${cy - r + 4}`}
-          fill="#c33"
+          fill="#ff6b6b"
         />
-        <circle cx={cx} cy={cy} r={2.5} fill="#c33" />
+        <circle cx={cx} cy={cy} r={2.5} fill="#ff6b6b" />
       </g>
     </svg>
   );
@@ -40,36 +41,26 @@ function Compass({ directionDeg, size = 64 }: { directionDeg: number; size?: num
 export default function WindCard({ wind, timestamp, segmentCount }: Props) {
   const dirText = `${compassPoint(wind.directionDeg)} (${Math.round(wind.directionDeg)}°)`;
   return (
-    <div
-      style={{
-        background: 'rgba(255,255,255,0.95)',
-        borderRadius: 8,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-        padding: '12px 14px',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        color: '#222',
-        minWidth: 220,
-      }}
-    >
-      <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+    <div style={{ ...glass, padding: '13px 15px', minWidth: 224 }}>
+      <div style={{ fontSize: 10.5, color: COLORS.faint, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 5, fontWeight: 600 }}>
         Copenhagen — Live
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
         <Compass directionDeg={wind.directionDeg} size={56} />
         <div>
-          <div style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.1 }}>
+          <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.05, letterSpacing: -0.5 }}>
             {wind.speedMs.toFixed(1)}
-            <span style={{ fontSize: 12, color: '#666', marginLeft: 4 }}>m/s</span>
+            <span style={{ fontSize: 12, color: COLORS.dim, marginLeft: 5, fontWeight: 500 }}>m/s</span>
           </div>
-          <div style={{ fontSize: 12, color: '#555' }}>from {dirText}</div>
+          <div style={{ fontSize: 12.5, color: COLORS.dim }}>from {dirText}</div>
           {wind.gustMs !== undefined && (
-            <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+            <div style={{ fontSize: 11, color: COLORS.faint, marginTop: 2 }}>
               gusts {wind.gustMs.toFixed(1)} m/s
             </div>
           )}
         </div>
       </div>
-      <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #eee', fontSize: 10, color: '#888' }}>
+      <div style={{ marginTop: 11, paddingTop: 9, borderTop: `1px solid ${COLORS.line}`, fontSize: 10, color: COLORS.faint }}>
         Canyon-modified across {segmentCount.toLocaleString()} street segments
         {timestamp && <div style={{ marginTop: 2 }}>updated {new Date(timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>}
       </div>

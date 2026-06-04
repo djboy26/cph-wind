@@ -2,6 +2,10 @@
 // Methodology + attribution modal. Toggled by a small "i" button in the corner.
 
 import { useState } from "react";
+import { glass, COLORS, FONT } from "./ui";
+
+const link: React.CSSProperties = { color: COLORS.accent, textDecoration: "none" };
+const h3: React.CSSProperties = { fontSize: 15, marginTop: 18, marginBottom: 6, color: COLORS.text };
 
 export default function About() {
   const [open, setOpen] = useState(false);
@@ -12,22 +16,21 @@ export default function About() {
         onClick={() => setOpen(true)}
         aria-label="About this map"
         style={{
+          ...glass,
           position: "absolute",
           bottom: 16,
           left: 16,
-          width: 32,
-          height: 32,
+          width: 34,
+          height: 34,
           borderRadius: "50%",
-          border: "none",
-          background: "rgba(255,255,255,0.95)",
-          boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
           cursor: "pointer",
           fontSize: 16,
           fontFamily: "Georgia, serif",
           fontStyle: "italic",
-          fontWeight: 600,
-          color: "#333",
+          fontWeight: 700,
+          color: COLORS.text,
           zIndex: 20,
+          padding: 0,
         }}
       >
         i
@@ -39,7 +42,9 @@ export default function About() {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.4)",
+            background: "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(3px)",
+            WebkitBackdropFilter: "blur(3px)",
             zIndex: 100,
             display: "flex",
             alignItems: "center",
@@ -50,80 +55,60 @@ export default function About() {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: "white",
-              borderRadius: 12,
+              ...glass,
               maxWidth: 560,
               maxHeight: "85vh",
               overflowY: "auto",
               padding: "24px 28px",
-              fontFamily: "system-ui, -apple-system, sans-serif",
               fontSize: 14,
-              lineHeight: 1.5,
-              color: "#222",
-              boxShadow: "0 12px 40px rgba(0,0,0,0.25)",
+              lineHeight: 1.55,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 12 }}>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>About this map</h2>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: COLORS.text }}>Copenhagen Wind</h2>
               <button
                 onClick={() => setOpen(false)}
                 aria-label="Close"
-                style={{ border: "none", background: "transparent", fontSize: 24, cursor: "pointer", color: "#888", lineHeight: 1, padding: 0 }}
+                style={{ border: "none", background: "transparent", fontSize: 24, cursor: "pointer", color: COLORS.dim, lineHeight: 1, padding: 0, fontFamily: FONT }}
               >×</button>
             </div>
 
-            <p>
-              This map shows the wind currently blowing along every street in Greater Copenhagen,
-              calculated from regional weather data combined with each street's local building geometry.
-              The goal is to give cyclists a fast read on where the wind is helping or hurting before
-              they choose a route.
+            <p style={{ color: COLORS.dim }}>
+              Live wind blowing along every street in Greater Copenhagen, combining regional weather
+              with each street's local building geometry — so cyclists can see where the wind helps or
+              hurts, and plan a route around it.
             </p>
 
-            <h3 style={{ fontSize: 15, marginTop: 18, marginBottom: 6 }}>How the wind is calculated</h3>
-            <p style={{ margin: "6px 0" }}>
-              The regional wind (one value, updated every 10 minutes) comes from Open-Meteo's 10-metre
-              forecast. For each street segment, we measure the local cross-section from OpenStreetMap
-              building footprints: perpendicular rays from the street centreline find the nearest
-              left and right building walls, giving measured street width and flanking wall heights.
+            <h3 style={h3}>How the wind is calculated</h3>
+            <p style={{ margin: "6px 0", color: COLORS.dim }}>
+              The regional wind (one value, refreshed every 10 min) comes from MET Norway's
+              Locationforecast (yr.no). For each street, perpendicular rays from the centreline find the
+              nearest left/right building walls (from OpenStreetMap footprints), giving the street width
+              and flanking wall heights.
             </p>
-            <p style={{ margin: "6px 0" }}>
-              At five points across the street width, we apply an urban canyon model (Soulhac et al.,
-              2008): wind parallel to the street is amplified (channeling), wind perpendicular is
-              attenuated (skimming flow). Each lane gets its own modified wind vector based on
-              local distance to the nearest wall and interpolated wall height. Animated arrows show
-              wind flow direction; colour shows speed.
-            </p>
-            <p style={{ margin: "6px 0", fontSize: 13, color: "#555" }}>
-              Zoom in to see five arrows side-by-side per street (zoom ≥ 15). At zoom 13–14 a single
-              centre arrow is shown. Below zoom 13 arrows are hidden for clarity.
+            <p style={{ margin: "6px 0", color: COLORS.dim }}>
+              An urban-canyon model (Soulhac et al., 2008) then channels that wind: flow along the street
+              is amplified, flow across it is attenuated. Arrows are confined to the carriageway and
+              coloured by a cyclist wind-strength scale; click a street for the head/tailwind impact.
             </p>
 
-            <h3 style={{ fontSize: 15, marginTop: 18, marginBottom: 6 }}>What it doesn't model</h3>
-            <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
-              <li>True spatial wind variation across the city (Open-Meteo gives a single value)</li>
-              <li>Gusts at street level (only mean wind is channeled)</li>
-              <li>Recirculation behind tall buildings, turbulence, or vortex shedding</li>
-              <li>Bridge exposure (e.g. Knippelsbro likely has stronger wind than shown)</li>
+            <h3 style={h3}>Accuracy</h3>
+            <p style={{ margin: "6px 0", color: COLORS.dim }}>
+              The regional input is validated hourly against real observations from DMI weather stations
+              and Copenhagen Airport (METAR). The per-street values are a physically-motivated model, not
+              a measurement — true street-level wind would need an anemometer on the street.
+            </p>
+
+            <h3 style={h3}>Data &amp; attribution</h3>
+            <ul style={{ margin: "6px 0", paddingLeft: 20, fontSize: 13, color: COLORS.dim }}>
+              <li>Roads &amp; buildings: © <a style={link} href="https://openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a> (ODbL)</li>
+              <li>Weather: <a style={link} href="https://api.met.no/" target="_blank" rel="noreferrer">MET Norway</a> (CC BY 4.0); validation obs <a style={link} href="https://www.dmi.dk/" target="_blank" rel="noreferrer">DMI</a></li>
+              <li>Basemap: © <a style={link} href="https://carto.com/attributions" target="_blank" rel="noreferrer">CARTO</a></li>
+              <li>Engine: <a style={link} href="https://maplibre.org/" target="_blank" rel="noreferrer">MapLibre GL</a>, <a style={link} href="https://deck.gl/" target="_blank" rel="noreferrer">deck.gl</a></li>
             </ul>
 
-            <h3 style={{ fontSize: 15, marginTop: 18, marginBottom: 6 }}>Data quality</h3>
-            <p style={{ margin: "6px 0" }}>
-              Roads and building footprints come from OpenStreetMap. Cross-sections are classified as
-              measured (both walls found), partial (one open side), or fallback (no nearby walls —
-              uses highway-type width estimates). About 88% of buildings lack explicit height tags
-              and fall back to type-based estimates (typically 9 m for residential).
-            </p>
-
-            <h3 style={{ fontSize: 15, marginTop: 18, marginBottom: 6 }}>Data & attribution</h3>
-            <ul style={{ margin: "6px 0", paddingLeft: 20, fontSize: 13 }}>
-              <li>Road and building geometry: © <a href="https://openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a> (ODbL)</li>
-              <li>Weather: <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a> (CC BY 4.0)</li>
-              <li>Vector tiles: <a href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a></li>
-              <li>Map engine: <a href="https://maplibre.org/" target="_blank" rel="noreferrer">MapLibre GL</a>, <a href="https://deck.gl/" target="_blank" rel="noreferrer">deck.gl</a></li>
-            </ul>
-
-            <p style={{ fontSize: 12, color: "#777", marginTop: 18, marginBottom: 0 }}>
-              Built as a personal project. Source on <a href="https://github.com/djboy26/cph-wind" target="_blank" rel="noreferrer">GitHub</a>.
+            <p style={{ fontSize: 12, color: COLORS.faint, marginTop: 18, marginBottom: 0 }}>
+              Source on <a style={link} href="https://github.com/djboy26/cph-wind" target="_blank" rel="noreferrer">GitHub</a>.
             </p>
           </div>
         </div>
