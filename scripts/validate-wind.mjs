@@ -50,10 +50,40 @@ function angDiff(a, b) {
   return d > 180 ? 360 - d : d;
 }
 
-async function getJson(url, opts) {
-  const res = await fetch(url, opts);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url.split("?")[0]}`);
-  return res.json();
+// Resilient JSON fetch: per-attempt timeout + retry with exponential backoff, and
+// it surfaces the real network cause (e.g. ECONNRESET) instead of "fetch failed".
+// Open-Meteo in particular intermittently resets connections under load.
+async function getJson(url, opts = {}, { retries = 4, timeoutMs = 20000 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...opts, signal: ctrl.signal });
+      const body = await res.text();
+      if (!res.ok) throw new Error(`HTTP ${res.status}${res.status === 429 ? " (rate limited)" : ""}`);
+      try {
+        return JSON.parse(body);
+      } catch {
+        // A 200 with an HTML/error body — typically a gateway throttle page.
+        throw new Error(`non-JSON response (${body.slice(0, 40).replace(/\s+/g, " ")}…)`);
+      }
+    } catch (e) {
+      lastErr = e;
+      const reason = e.cause?.code || e.name || e.message;
+      if (attempt < retries) {
+        // Back off harder on rate limits to let the quota window recover.
+        const rate = /429|rate|non-JSON/.test(reason);
+        const backoff = (rate ? 5000 : 1000) * 2 ** attempt;
+        console.warn(`    retry ${attempt + 1}/${retries} (${reason}) in ${backoff}ms…`);
+        await new Promise((r) => setTimeout(r, backoff));
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const reason = lastErr?.cause?.code || lastErr?.message || "unknown error";
+  throw new Error(`${reason} for ${url.split("?")[0]}`);
 }
 
 // ---------- Observation sources ----------
@@ -147,16 +177,23 @@ async function fetchDmi() {
 
 // ---------- Model ----------
 
-async function fetchOpenMeteo(lat, lon) {
+// One batched request for all points (Open-Meteo accepts comma-separated coords
+// and returns an array). Fewer calls = fewer chances to hit the flaky endpoint.
+async function fetchOpenMeteoBatch(points) {
   const p = new URLSearchParams({
-    latitude: lat.toFixed(4),
-    longitude: lon.toFixed(4),
+    latitude: points.map((q) => q.lat.toFixed(4)).join(","),
+    longitude: points.map((q) => q.lon.toFixed(4)).join(","),
     current: "wind_speed_10m,wind_direction_10m,wind_gusts_10m",
     wind_speed_unit: "ms",
   });
   const j = await getJson(`${OPEN_METEO}?${p}`);
-  const c = j.current;
-  return { time: c.time, dirDeg: c.wind_direction_10m, speedMs: c.wind_speed_10m, gustMs: c.wind_gusts_10m };
+  const arr = Array.isArray(j) ? j : [j]; // single location → object, not array
+  return arr.map((x) => ({
+    time: x.current.time,
+    dirDeg: x.current.wind_direction_10m,
+    speedMs: x.current.wind_speed_10m,
+    gustMs: x.current.wind_gusts_10m,
+  }));
 }
 
 // ---------- Main ----------
@@ -182,16 +219,26 @@ async function main() {
   }
   console.log(`Got ${obs.length} station observation(s). Sampling Open-Meteo at each…\n`);
 
-  const pairs = [];
-  for (const o of obs) {
-    if (o.speedMs == null) continue;
-    let model;
-    try {
-      model = await fetchOpenMeteo(o.lat, o.lon);
-    } catch (e) {
-      console.warn(`  Open-Meteo failed for ${o.station}: ${e.message}`);
-      continue;
+  const validObs = obs.filter((o) => o.speedMs != null && o.lat != null && o.lon != null);
+  let models;
+  try {
+    models = await fetchOpenMeteoBatch(validObs);
+    if (models.length !== validObs.length) {
+      throw new Error(`returned ${models.length} results for ${validObs.length} points`);
     }
+  } catch (e) {
+    // External endpoint flaky/throttled — not our bug. Skip this hour cleanly
+    // (exit 0) so the cron doesn't go red and get auto-disabled; next run retries.
+    console.warn(`\n⚠ No sample this run — Open-Meteo unreachable after retries: ${e.message}`);
+    console.warn("  (METAR/DMI observations were fine; only the model endpoint failed.)");
+    await printAggregate();
+    return;
+  }
+
+  const pairs = [];
+  for (let idx = 0; idx < validObs.length; idx++) {
+    const o = validObs[idx];
+    const model = models[idx];
     const skew = minutesBetween(o.time, model.time);
     pairs.push({
       ts: new Date().toISOString(),
