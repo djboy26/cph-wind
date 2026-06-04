@@ -2,7 +2,7 @@
 // Route-planning controls + the list of compared A→B options with their wind data.
 // Presentational: all state lives in App.
 
-import type { RouteOption } from "../routing/windRoute";
+import { RANK_CRITERIA, type RouteOption, type RankCriterion } from "../routing/windRoute";
 
 interface LatLon {
   lat: number;
@@ -20,8 +20,11 @@ interface Props {
   onUseGps: () => void;
   onReset: () => void;
   options: RouteOption[];
+  bestId: string | null;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  criterion: RankCriterion;
+  onCriterion: (c: RankCriterion) => void;
   isMobile: boolean;
 }
 
@@ -51,7 +54,7 @@ const BTN: React.CSSProperties = {
 
 export default function RoutePanel({
   active, onToggle, start, end, building, gpsLoading, gpsError,
-  onUseGps, onReset, options, selectedId, onSelect, isMobile,
+  onUseGps, onReset, options, bestId, selectedId, onSelect, criterion, onCriterion, isMobile,
 }: Props) {
   if (!active) {
     return (
@@ -74,13 +77,14 @@ export default function RoutePanel({
   const windSimilar =
     options.length > 1 && Math.max(...exposures) - Math.min(...exposures) < 0.06;
 
+  const criterionLabel = RANK_CRITERIA.find((c) => c.key === criterion)?.label ?? "";
   const status =
     !start ? "Click the map to set your start (or use GPS)." :
     !end ? "Now click your destination." :
     building ? "Preparing road network…" :
     options.length === 0 ? "No route found between those points." :
-    windSimilar ? `${options.length} routes — wind is similar on all (★ = least into-wind).` :
-    `${options.length} routes — ★ is best for wind (least into-wind).`;
+    windSimilar ? `${options.length} routes — wind is similar on all (★ = ${criterionLabel}).` :
+    `${options.length} routes ranked by ${criterionLabel} (★ = best).`;
 
   return (
     <div
@@ -109,6 +113,33 @@ export default function RoutePanel({
       </div>
       {gpsError && <div style={{ fontSize: 11, color: "#b5480f", marginBottom: 6 }}>{gpsError}</div>}
 
+      {options.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 10, color: "#999", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>
+            Rank by
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+            {RANK_CRITERIA.map((c) => (
+              <button
+                key={c.key}
+                title={c.hint}
+                onClick={() => onCriterion(c.key)}
+                style={{
+                  ...BTN,
+                  padding: "4px 9px",
+                  fontSize: 12,
+                  border: c.key === criterion ? "1.5px solid #1e78f0" : "1px solid #ccc",
+                  background: c.key === criterion ? "#eaf2ff" : "white",
+                  fontWeight: c.key === criterion ? 600 : 400,
+                }}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ fontSize: 12, color: "#555", marginBottom: options.length ? 10 : 0 }}>{status}</div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -131,9 +162,9 @@ export default function RoutePanel({
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontWeight: 600, fontSize: 13 }}>
-                  {o.bestWind ? "★ " : ""}Route {i + 1}
-                  {o.bestWind && <span style={{ color: "#1a7f37", marginLeft: 6, fontSize: 11 }}>Best for wind</span>}
-                  {o.id === shortestId && !o.bestWind && <span style={{ color: "#666", marginLeft: 6, fontSize: 11 }}>Shortest</span>}
+                  {o.id === bestId ? "★ " : ""}Route {i + 1}
+                  {o.id === bestId && <span style={{ color: "#1a7f37", marginLeft: 6, fontSize: 11 }}>{criterionLabel}</span>}
+                  {o.id === shortestId && o.id !== bestId && <span style={{ color: "#666", marginLeft: 6, fontSize: 11 }}>Shortest</span>}
                 </span>
               </div>
               {/* Three criteria: time · wind suffered · % into wind */}

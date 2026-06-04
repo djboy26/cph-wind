@@ -12,7 +12,7 @@ import { useCurrentWind } from "./hooks/useCurrentWind";
 import { arrowDensityForZoom, buildWindArrows, roadWidthForHighway, type RawSegment } from "./layers/buildWindArrows";
 import { createWindFlowLayer, type WindArrowInstance } from "./layers/WindFlowLayer";
 import { buildGraph, nearestNode } from "./routing/graph";
-import { planRoutes, type RouteOption } from "./routing/windRoute";
+import { planRoutes, rankRoutes, type RouteOption, type RankCriterion } from "./routing/windRoute";
 import WindCard from "./components/Windcard";
 import Legend from "./components/Legend";
 import SegmentTooltip from "./components/SegmentTooltip";
@@ -143,6 +143,7 @@ function MapApp() {
   const [start, setStart] = useState<LatLon | null>(null);
   const [end, setEnd] = useState<LatLon | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [criterion, setCriterion] = useState<RankCriterion>("recommended");
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
 
@@ -161,8 +162,16 @@ function MapApp() {
     return planRoutes(graph, s, g, windResult.wind);
   }, [routing, graph, start, end, windResult]);
 
+  // Rank by the rider's chosen criterion; the winner is the highlighted "best".
+  const { sorted: rankedRoutes, bestId } = useMemo(
+    () => rankRoutes(routeOptions, criterion),
+    [routeOptions, criterion],
+  );
+
   const selectedRoute =
-    routeOptions.find((o) => o.id === selectedRouteId) ?? routeOptions[0] ?? null;
+    rankedRoutes.find((o) => o.id === selectedRouteId)
+    ?? rankedRoutes.find((o) => o.id === bestId)
+    ?? rankedRoutes[0] ?? null;
 
   const resetRoute = useCallback(() => {
     setStart(null); setEnd(null); setSelectedRouteId(null); setGpsError(null);
@@ -310,9 +319,9 @@ function MapApp() {
         }),
       );
     }
-    if (routing && routeOptions.length > 0) {
+    if (routing && rankedRoutes.length > 0) {
       // Draw unselected first, selected last so it sits on top.
-      const ordered = [...routeOptions].sort(
+      const ordered = [...rankedRoutes].sort(
         (a, b) => (a.id === selectedRoute?.id ? 1 : 0) - (b.id === selectedRoute?.id ? 1 : 0),
       );
       result.push(
@@ -322,7 +331,7 @@ function MapApp() {
           getPath: (o) => o.coords,
           getColor: (o) =>
             o.id === selectedRoute?.id ? [30, 120, 240, 255]
-            : o.bestWind ? [40, 160, 90, 220]
+            : o.id === bestId ? [40, 160, 90, 220]
             : [130, 140, 150, 170],
           getWidth: (o) => (o.id === selectedRoute?.id ? 7 : 4),
           widthUnits: "pixels",
@@ -331,7 +340,7 @@ function MapApp() {
           jointRounded: true,
           pickable: true,
           onClick: (info: any) => { if (info.object) { setSelectedRouteId(info.object.id); return true; } return false; },
-          updateTriggers: { getColor: selectedRoute?.id, getWidth: selectedRoute?.id },
+          updateTriggers: { getColor: `${selectedRoute?.id}|${bestId}`, getWidth: selectedRoute?.id },
         }),
       );
     }
@@ -357,7 +366,7 @@ function MapApp() {
       );
     }
     return result;
-  }, [roads, windArrows, flowPhase, isMobile, routing, routeOptions, selectedRoute, start, end]);
+  }, [roads, windArrows, flowPhase, isMobile, routing, rankedRoutes, selectedRoute, bestId, start, end]);
 
   const stillLoading = !roads || !segments;
   const showWindError = windError && !windResult;
@@ -412,9 +421,12 @@ function MapApp() {
           gpsError={gpsError}
           onUseGps={useGps}
           onReset={resetRoute}
-          options={routeOptions}
+          options={rankedRoutes}
+          bestId={bestId}
           selectedId={selectedRoute?.id ?? null}
           onSelect={setSelectedRouteId}
+          criterion={criterion}
+          onCriterion={setCriterion}
           isMobile={isMobile}
         />
       </div>

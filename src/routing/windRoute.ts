@@ -87,8 +87,6 @@ export interface RouteOption {
   metrics: RouteMetrics;
   /** [lon, lat] polyline for rendering. */
   coords: [number, number][];
-  /** True for the route with the lowest wind-adjusted time. */
-  bestWind: boolean;
 }
 
 function toCoords(g: RoutingGraph, route: RoutePath): [number, number][] {
@@ -147,25 +145,66 @@ export function planRoutes(
     unique.push(c);
   }
 
-  const options: RouteOption[] = unique.slice(0, maxOptions).map((c, i) => ({
+  return unique.slice(0, maxOptions).map((c, i) => ({
     id: `route-${i}`,
     kind: c.kind,
     path: c.path,
     metrics: routeMetrics(c.path, wind, params),
     coords: toCoords(g, c.path),
-    bestWind: false,
   }));
+}
 
-  // "Best for wind" = least time spent riding INTO a real headwind.
-  //
-  // For a fixed start/destination the *net* headwind is identical on every route
-  // (it equals −wind·(B−A), a constant), so a route cannot escape the wind — and
-  // average headwind just scales as 1/length (longer routes dilute it). What a
-  // route CAN change is how much of the ride is spent grinding into the wind, i.e.
-  // headwindExposure. Rank by that; tie-break by the wind time penalty.
-  options.sort((a, b) =>
-    a.metrics.headwindExposure - b.metrics.headwindExposure ||
-    a.metrics.windDeltaS - b.metrics.windDeltaS);
-  if (options.length > 0) options[0].bestWind = true;
-  return options;
+// ---------- Ranking (rider chooses the criterion) ----------
+
+export type RankCriterion = 'recommended' | 'time' | 'exposure' | 'avgWind';
+
+export const RANK_CRITERIA: { key: RankCriterion; label: string; hint: string }[] = [
+  { key: 'recommended', label: 'Recommended', hint: 'Balanced time + wind' },
+  { key: 'time', label: 'Fastest', hint: 'Shortest wind-adjusted time' },
+  { key: 'exposure', label: 'Least headwind', hint: 'Least % ridden into the wind' },
+  { key: 'avgWind', label: 'Calmest', hint: 'Lowest average headwind' },
+];
+
+// Weights for the balanced "Recommended" score (each normalised 0..1, lower=better).
+const RECOMMENDED_WEIGHTS = { time: 0.45, exposure: 0.35, avgWind: 0.2 };
+
+function normaliser(values: number[]): (v: number) => number {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  return (v) => (range > 1e-9 ? (v - min) / range : 0);
+}
+
+function rawValue(o: RouteOption, key: Exclude<RankCriterion, 'recommended'>): number {
+  if (key === 'time') return o.metrics.timeS;
+  if (key === 'exposure') return o.metrics.headwindExposure;
+  return o.metrics.avgHeadwindMs; // avgWind — lower (more tailwind) is better
+}
+
+/**
+ * Sort routes by the chosen criterion (lower is better for all of them) and
+ * return the winner's id. "recommended" is a weighted, range-normalised blend of
+ * time, into-wind exposure, and average headwind.
+ */
+export function rankRoutes(
+  options: RouteOption[],
+  criterion: RankCriterion,
+): { sorted: RouteOption[]; bestId: string | null } {
+  if (options.length === 0) return { sorted: [], bestId: null };
+
+  let score: (o: RouteOption) => number;
+  if (criterion === 'recommended') {
+    const nt = normaliser(options.map((o) => o.metrics.timeS));
+    const ne = normaliser(options.map((o) => o.metrics.headwindExposure));
+    const na = normaliser(options.map((o) => o.metrics.avgHeadwindMs));
+    score = (o) =>
+      RECOMMENDED_WEIGHTS.time * nt(o.metrics.timeS) +
+      RECOMMENDED_WEIGHTS.exposure * ne(o.metrics.headwindExposure) +
+      RECOMMENDED_WEIGHTS.avgWind * na(o.metrics.avgHeadwindMs);
+  } else {
+    score = (o) => rawValue(o, criterion);
+  }
+
+  const sorted = [...options].sort((a, b) => score(a) - score(b));
+  return { sorted, bestId: sorted[0].id };
 }
