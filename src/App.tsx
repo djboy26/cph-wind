@@ -2,7 +2,7 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import DeckGL from "@deck.gl/react";
-import { GeoJsonLayer } from "@deck.gl/layers";
+import { GeoJsonLayer, PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { WebMercatorViewport } from "@deck.gl/core";
 import { Map as MapLibreMap } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -11,10 +11,15 @@ import type { FeatureCollection } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
 import { arrowDensityForZoom, buildWindArrows, roadWidthForHighway, type RawSegment } from "./layers/buildWindArrows";
 import { createWindFlowLayer, type WindArrowInstance } from "./layers/WindFlowLayer";
+import { buildGraph, nearestNode } from "./routing/graph";
+import { planRoutes, type RouteOption } from "./routing/windRoute";
 import WindCard from "./components/Windcard";
 import Legend from "./components/Legend";
 import SegmentTooltip from "./components/SegmentTooltip";
+import RoutePanel from "./components/RoutePanel";
 import About from "./components/About";
+
+interface LatLon { lat: number; lon: number; }
 
 interface HoverState {
   x: number;
@@ -133,6 +138,56 @@ function MapApp() {
   const [hover, setHover] = useState<HoverState | null>(null);
   const [pinned, setPinned] = useState<HoverState | null>(null);
 
+  // --- Route planning ---
+  const [routing, setRouting] = useState(false);
+  const [start, setStart] = useState<LatLon | null>(null);
+  const [end, setEnd] = useState<LatLon | null>(null);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+
+  // Build the routing graph once, the first time route planning is opened; cached
+  // thereafter (routeReady stays true, so toggling the panel never rebuilds it).
+  const [routeReady, setRouteReady] = useState(false);
+  const graph = useMemo(
+    () => (routeReady && roads ? buildGraph(roads) : null),
+    [routeReady, roads],
+  );
+
+  const routeOptions = useMemo<RouteOption[]>(() => {
+    if (!routing || !graph || !start || !end || !windResult) return [];
+    const s = nearestNode(graph, start.lon, start.lat);
+    const g = nearestNode(graph, end.lon, end.lat);
+    return planRoutes(graph, s, g, windResult.wind);
+  }, [routing, graph, start, end, windResult]);
+
+  const selectedRoute =
+    routeOptions.find((o) => o.id === selectedRouteId) ?? routeOptions[0] ?? null;
+
+  const resetRoute = useCallback(() => {
+    setStart(null); setEnd(null); setSelectedRouteId(null); setGpsError(null);
+  }, []);
+
+  const toggleRouting = useCallback(() => {
+    setRouteReady(true); // once opened, keep the graph cached even if closed
+    setRouting((r) => !r);
+    setPinned(null); setHover(null);
+  }, []);
+
+  const useGps = useCallback(() => {
+    if (!navigator.geolocation) { setGpsError("Geolocation not available in this browser."); return; }
+    setGpsLoading(true); setGpsError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setStart({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        setEnd(null); setSelectedRouteId(null); setGpsLoading(false);
+        setViewState((vs) => ({ ...vs, longitude: pos.coords.longitude, latitude: pos.coords.latitude, zoom: Math.max(vs.zoom ?? 14, 14) }));
+      },
+      (err) => { setGpsLoading(false); setGpsError(`Location failed: ${err.message}`); },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }, []);
+
   useEffect(() => {
     Promise.all([
       fetch("/data/cph-roads.json").then((r) => {
@@ -244,23 +299,83 @@ function MapApp() {
         createWindFlowLayer({
           data: windArrows,
           flowPhase,
-          onHover: isMobile ? undefined : (info) => {
+          // While planning a route, clicks set waypoints instead of pinning arrows.
+          onHover: isMobile || routing ? undefined : (info) => {
             setHover(info.object ? { x: info.x, y: info.y, arrow: info.object } : null);
           },
-          onClick: (info) => {
+          onClick: routing ? undefined : (info) => {
             if (info.object) setPinned({ x: info.x, y: info.y, arrow: info.object });
             return true;
           },
         }),
       );
     }
+    if (routing && routeOptions.length > 0) {
+      // Draw unselected first, selected last so it sits on top.
+      const ordered = [...routeOptions].sort(
+        (a, b) => (a.id === selectedRoute?.id ? 1 : 0) - (b.id === selectedRoute?.id ? 1 : 0),
+      );
+      result.push(
+        new PathLayer<RouteOption>({
+          id: "routes",
+          data: ordered,
+          getPath: (o) => o.coords,
+          getColor: (o) =>
+            o.id === selectedRoute?.id ? [30, 120, 240, 255]
+            : o.bestWind ? [40, 160, 90, 220]
+            : [130, 140, 150, 170],
+          getWidth: (o) => (o.id === selectedRoute?.id ? 7 : 4),
+          widthUnits: "pixels",
+          widthMinPixels: 3,
+          capRounded: true,
+          jointRounded: true,
+          pickable: true,
+          onClick: (info: any) => { if (info.object) { setSelectedRouteId(info.object.id); return true; } return false; },
+          updateTriggers: { getColor: selectedRoute?.id, getWidth: selectedRoute?.id },
+        }),
+      );
+    }
+    if (routing && (start || end)) {
+      const pts = [
+        start && { pos: [start.lon, start.lat], color: [40, 160, 90] },
+        end && { pos: [end.lon, end.lat], color: [210, 50, 50] },
+      ].filter(Boolean) as { pos: [number, number]; color: [number, number, number] }[];
+      result.push(
+        new ScatterplotLayer({
+          id: "route-endpoints",
+          data: pts,
+          getPosition: (d: any) => d.pos,
+          getFillColor: (d: any) => d.color,
+          getRadius: 7,
+          radiusUnits: "pixels",
+          radiusMinPixels: 6,
+          stroked: true,
+          getLineColor: [255, 255, 255],
+          lineWidthMinPixels: 2,
+          pickable: false,
+        }),
+      );
+    }
     return result;
-  }, [roads, windArrows, flowPhase, isMobile]);
+  }, [roads, windArrows, flowPhase, isMobile, routing, routeOptions, selectedRoute, start, end]);
 
   const stillLoading = !roads || !segments;
   const showWindError = windError && !windResult;
   const showDataError = dataError && stillLoading;
   const activeTip = pinned ?? hover;
+
+  const onMapClick = useCallback((info: any) => {
+    if (routing && info.coordinate) {
+      const [lon, lat] = info.coordinate;
+      setSelectedRouteId(null);
+      setGpsError(null);
+      if (!start) setStart({ lat, lon });
+      else if (!end) setEnd({ lat, lon });
+      else { setStart({ lat, lon }); setEnd(null); } // both set → begin a new pair
+      return;
+    }
+    if (!info.layer) setPinned(null);
+  }, [routing, start, end]);
 
   const topCardStyle: React.CSSProperties = isMobile
     ? { position: "absolute", top: 8, left: 8, right: 8 }
@@ -268,6 +383,9 @@ function MapApp() {
   const legendStyle: React.CSSProperties = isMobile
     ? { position: "absolute", bottom: pinned ? 200 : 8, left: 8, right: 8 }
     : { position: "absolute", bottom: 16, right: 16 };
+  const routePanelStyle: React.CSSProperties = isMobile
+    ? { position: "absolute", bottom: 8, left: 8, right: 8, zIndex: 20 }
+    : { position: "absolute", top: 16, left: 16, zIndex: 20 };
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
@@ -277,10 +395,29 @@ function MapApp() {
         onViewStateChange={onViewStateChange}
         controller={true}
         layers={layers}
-        onClick={(info: any) => { if (!info.layer) setPinned(null); }}
+        getCursor={({ isDragging }) => (isDragging ? "grabbing" : routing ? "crosshair" : "grab")}
+        onClick={onMapClick}
       >
         <MapLibreMap reuseMaps mapStyle={MAP_STYLE} />
       </DeckGL>
+
+      <div style={routePanelStyle}>
+        <RoutePanel
+          active={routing}
+          onToggle={toggleRouting}
+          start={start}
+          end={end}
+          building={routing && !graph}
+          gpsLoading={gpsLoading}
+          gpsError={gpsError}
+          onUseGps={useGps}
+          onReset={resetRoute}
+          options={routeOptions}
+          selectedId={selectedRoute?.id ?? null}
+          onSelect={setSelectedRouteId}
+          isMobile={isMobile}
+        />
+      </div>
 
       <div style={topCardStyle}>
         {showDataError && (
@@ -312,7 +449,7 @@ function MapApp() {
         )}
       </div>
 
-      {windResult && !stillLoading && (
+      {windResult && !stillLoading && !(routing && isMobile) && (
         <div style={legendStyle}>
           <Legend />
         </div>
