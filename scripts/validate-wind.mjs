@@ -1,23 +1,28 @@
 // scripts/validate-wind.mjs
 //
-// Validates the AMBIENT wind input (raw Open-Meteo 10 m wind, before the app's
-// ×0.6 boundary-layer factor and canyon channeling) against independent live
-// observations, sampled at each station's exact coordinates (apples-to-apples:
-// same place, same 10 m height, same time).
+// Validates ambient 10 m wind MODELS against independent live observations,
+// sampled at each station's exact coordinates (apples-to-apples: same place,
+// same 10 m height, same time). Compares multiple model providers so the data
+// decides which is most accurate for Copenhagen — and so collection keeps
+// working when any single provider is down.
 //
-// Ground truth:
+// Models compared:
+//   - MET Norway (yr.no) locationforecast — reliable, keyless (primary).
+//   - Open-Meteo — what the app currently uses (best-effort; skipped if down).
+//
+// Ground truth (observations):
 //   - METAR EKCH (Copenhagen Airport) — no API key.
-//   - DMI metObs stations across greater Copenhagen — currently open access
-//     (no key needed). If DMI ever re-enables auth, set DMI_API_KEY and it is
-//     passed through automatically.
+//   - DMI metObs stations across greater Copenhagen — open access (no key).
+//     If DMI ever re-enables auth, set DMI_API_KEY and it is passed through.
 //
-// Each run prints per-station errors + a cyclist-category confusion check, and
-// appends every (obs, model) pair to validation-log.ndjson so repeated/scheduled
-// runs accumulate a multi-regime dataset. It then prints running aggregate stats.
+// Each run appends every (model, obs) pair to validation-log.ndjson and prints a
+// per-model running aggregate so repeated/scheduled runs accumulate a dataset.
 
 import { readFile, appendFile } from "node:fs/promises";
 
 const OPEN_METEO = "https://api.open-meteo.com/v1/forecast";
+const MET_NO = "https://api.met.no/weatherapi/locationforecast/2.0/compact";
+const MET_NO_UA = "cph-wind-validation/1.0 (https://github.com/djboy26/cph-wind; sourabhrj26@gmail.com)";
 const METAR_URL = "https://aviationweather.gov/api/data/metar?ids=EKCH&format=json";
 const DMI_BASE = "https://dmigw.govcloud.dk/v2/metObs/collections/observation/items";
 const DMI_KEY = process.env.DMI_API_KEY;
@@ -26,18 +31,17 @@ const LOG_PATH = "validation-log.ndjson";
 const KT_TO_MS = 0.514444;
 // Greater-Copenhagen bbox (lon,lat order, OGC): minLon,minLat,maxLon,maxLat
 const CPH_BBOX = [12.40, 55.55, 12.75, 55.80];
-const MAX_TIME_SKEW_MIN = 20; // obs/model must be within this to be comparable
+const MAX_TIME_SKEW_MIN = 40; // obs/model must be within this to be comparable
 
 // ---- Provisional cyclist wind-speed scale (10 m equivalent, m/s) ----
-// Marked provisional: we refine these thresholds when we build the real
-// route-planning categorization. Used here only for the agreement check.
+// Provisional: refined when we build the real route-planning categorization.
 const CYCLIST_BINS = [
-  { name: "calm", max: 1.5 },     // unnoticeable
-  { name: "light", max: 3.3 },    // barely felt
-  { name: "moderate", max: 5.5 }, // noticeable effort into a headwind
-  { name: "fresh", max: 7.9 },    // hard work into a headwind
-  { name: "strong", max: 10.7 },  // tough, affects balance
-  { name: "severe", max: Infinity }, // avoid / hazardous
+  { name: "calm", max: 1.5 },
+  { name: "light", max: 3.3 },
+  { name: "moderate", max: 5.5 },
+  { name: "fresh", max: 7.9 },
+  { name: "strong", max: 10.7 },
+  { name: "severe", max: Infinity },
 ];
 function cyclistCategory(ms) {
   for (const b of CYCLIST_BINS) if (ms < b.max) return b.name;
@@ -46,13 +50,12 @@ function cyclistCategory(ms) {
 
 function angDiff(a, b) {
   if (a == null || b == null) return null;
-  let d = Math.abs(a - b) % 360;
+  const d = Math.abs(a - b) % 360;
   return d > 180 ? 360 - d : d;
 }
 
-// Resilient JSON fetch: per-attempt timeout + retry with exponential backoff, and
-// it surfaces the real network cause (e.g. ECONNRESET) instead of "fetch failed".
-// Open-Meteo in particular intermittently resets connections under load.
+// Resilient JSON fetch: per-attempt timeout + retry with backoff, surfacing the
+// real cause (ECONNRESET / HTTP 429 / non-JSON) instead of opaque "fetch failed".
 async function getJson(url, opts = {}, { retries = 4, timeoutMs = 20000 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -65,16 +68,14 @@ async function getJson(url, opts = {}, { retries = 4, timeoutMs = 20000 } = {}) 
       try {
         return JSON.parse(body);
       } catch {
-        // A 200 with an HTML/error body — typically a gateway throttle page.
         throw new Error(`non-JSON response (${body.slice(0, 40).replace(/\s+/g, " ")}…)`);
       }
     } catch (e) {
       lastErr = e;
-      const reason = e.cause?.code || e.name || e.message;
+      const reason = e.cause?.code || e.message || e.name;
       if (attempt < retries) {
-        // Back off harder on rate limits to let the quota window recover.
-        const rate = /429|rate|non-JSON/.test(reason);
-        const backoff = (rate ? 5000 : 1000) * 2 ** attempt;
+        const rate = /429|rate|non-JSON|502|503/.test(reason);
+        const backoff = (rate ? 4000 : 1000) * 2 ** attempt;
         console.warn(`    retry ${attempt + 1}/${retries} (${reason}) in ${backoff}ms…`);
         await new Promise((r) => setTimeout(r, backoff));
       }
@@ -82,8 +83,17 @@ async function getJson(url, opts = {}, { retries = 4, timeoutMs = 20000 } = {}) 
       clearTimeout(timer);
     }
   }
-  const reason = lastErr?.cause?.code || lastErr?.message || "unknown error";
-  throw new Error(`${reason} for ${url.split("?")[0]}`);
+  throw new Error(`${lastErr?.cause?.code || lastErr?.message || "unknown error"} for ${url.split("?")[0]}`);
+}
+
+// Open-Meteo returns UTC timestamps WITHOUT a trailing Z; normalize to UTC.
+function toUtcMs(s) {
+  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s).getTime();
+  const withSecs = /T\d{2}:\d{2}$/.test(s) ? s + ":00" : s;
+  return new Date(withSecs + "Z").getTime();
+}
+function minutesBetween(a, b) {
+  return Math.abs(toUtcMs(a) - toUtcMs(b)) / 60000;
 }
 
 // ---------- Observation sources ----------
@@ -95,12 +105,8 @@ async function fetchMetar() {
     if (!m) return [];
     const dir = typeof m.wdir === "number" ? m.wdir : null; // VRB → not a number
     return [{
-      source: "METAR",
-      station: m.icaoId || "EKCH",
-      lat: m.lat,
-      lon: m.lon,
-      time: m.reportTime || m.obsTime,
-      dirDeg: dir,
+      source: "METAR", station: m.icaoId || "EKCH", lat: m.lat, lon: m.lon,
+      time: m.reportTime || m.obsTime, dirDeg: dir,
       speedMs: m.wspd != null ? m.wspd * KT_TO_MS : null,
       gustMs: m.wgst != null ? m.wgst * KT_TO_MS : null,
     }];
@@ -112,16 +118,12 @@ async function fetchMetar() {
 
 function dmiUrl(parameterId, fromISO, toISO) {
   const p = new URLSearchParams({
-    parameterId,
-    bbox: CPH_BBOX.join(","),
-    datetime: `${fromISO}/${toISO}`,
-    limit: "1000",
+    parameterId, bbox: CPH_BBOX.join(","), datetime: `${fromISO}/${toISO}`, limit: "1000",
   });
-  if (DMI_KEY) p.set("api-key", DMI_KEY); // only if DMI re-enables auth
+  if (DMI_KEY) p.set("api-key", DMI_KEY);
   return `${DMI_BASE}?${p}`;
 }
 
-// Latest value per station for a given parameter.
 function latestPerStation(features) {
   const out = new Map();
   for (const f of features) {
@@ -130,11 +132,7 @@ function latestPerStation(features) {
     if (!id) continue;
     const prev = out.get(id);
     if (!prev || p.observed > prev.observed) {
-      out.set(id, {
-        observed: p.observed,
-        value: p.value,
-        coords: f.geometry?.coordinates, // [lon, lat]
-      });
+      out.set(id, { observed: p.observed, value: p.value, coords: f.geometry?.coordinates });
     }
   }
   return out;
@@ -142,7 +140,7 @@ function latestPerStation(features) {
 
 async function fetchDmi() {
   const to = new Date();
-  const from = new Date(to.getTime() - 90 * 60 * 1000); // last 90 min
+  const from = new Date(to.getTime() - 90 * 60 * 1000);
   const fromISO = from.toISOString().replace(/\.\d+Z$/, "Z");
   const toISO = to.toISOString().replace(/\.\d+Z$/, "Z");
   try {
@@ -158,14 +156,8 @@ async function fetchDmi() {
       const coords = s.coords || d?.coords;
       if (!coords) continue;
       rows.push({
-        source: "DMI",
-        station: id,
-        lat: coords[1],
-        lon: coords[0],
-        time: s.observed,
-        speedMs: s.value,
-        dirDeg: d ? d.value : null,
-        gustMs: null,
+        source: "DMI", station: id, lat: coords[1], lon: coords[0],
+        time: s.observed, speedMs: s.value, dirDeg: d ? d.value : null, gustMs: null,
       });
     }
     return rows;
@@ -175,40 +167,53 @@ async function fetchDmi() {
   }
 }
 
-// ---------- Model ----------
+// ---------- Model providers ----------
+// Each returns an array aligned to `points`, with null where that point failed.
 
-// One batched request for all points (Open-Meteo accepts comma-separated coords
-// and returns an array). Fewer calls = fewer chances to hit the flaky endpoint.
-async function fetchOpenMeteoBatch(points) {
-  const p = new URLSearchParams({
-    latitude: points.map((q) => q.lat.toFixed(4)).join(","),
-    longitude: points.map((q) => q.lon.toFixed(4)).join(","),
-    current: "wind_speed_10m,wind_direction_10m,wind_gusts_10m",
-    wind_speed_unit: "ms",
-  });
-  const j = await getJson(`${OPEN_METEO}?${p}`);
-  const arr = Array.isArray(j) ? j : [j]; // single location → object, not array
-  return arr.map((x) => ({
-    time: x.current.time,
-    dirDeg: x.current.wind_direction_10m,
-    speedMs: x.current.wind_speed_10m,
-    gustMs: x.current.wind_gusts_10m,
+async function metNorwayAll(points, retries) {
+  const now = Date.now();
+  const results = await Promise.allSettled(points.map(async (q) => {
+    const url = `${MET_NO}?lat=${q.lat.toFixed(4)}&lon=${q.lon.toFixed(4)}`;
+    const j = await getJson(url, { headers: { "User-Agent": MET_NO_UA } }, { retries });
+    const ts = j.properties.timeseries;
+    let best = ts[0], bestDiff = Infinity;
+    for (const t of ts) {
+      const diff = Math.abs(new Date(t.time).getTime() - now);
+      if (diff < bestDiff) { bestDiff = diff; best = t; }
+    }
+    const d = best.data.instant.details;
+    return { time: best.time, dirDeg: d.wind_from_direction, speedMs: d.wind_speed, gustMs: d.wind_speed_of_gust ?? null };
   }));
+  return results.map((r) => (r.status === "fulfilled" ? r.value : null));
 }
+
+async function openMeteoAll(points, retries) {
+  try {
+    const p = new URLSearchParams({
+      latitude: points.map((q) => q.lat.toFixed(4)).join(","),
+      longitude: points.map((q) => q.lon.toFixed(4)).join(","),
+      current: "wind_speed_10m,wind_direction_10m,wind_gusts_10m",
+      wind_speed_unit: "ms",
+    });
+    const j = await getJson(`${OPEN_METEO}?${p}`, {}, { retries });
+    const arr = Array.isArray(j) ? j : [j];
+    if (arr.length !== points.length) throw new Error(`returned ${arr.length} for ${points.length} points`);
+    return arr.map((x) => ({
+      time: x.current.time, dirDeg: x.current.wind_direction_10m,
+      speedMs: x.current.wind_speed_10m, gustMs: x.current.wind_gusts_10m,
+    }));
+  } catch (e) {
+    console.warn(`  open_meteo: ${e.message} — skipping this model this run`);
+    return points.map(() => null);
+  }
+}
+
+const MODELS = [
+  { name: "met_norway", fetch: metNorwayAll, retries: 3 },
+  { name: "open_meteo", fetch: openMeteoAll, retries: 2 },
+];
 
 // ---------- Main ----------
-
-// Open-Meteo returns UTC timestamps WITHOUT a trailing Z (e.g. "2026-06-04T07:45"),
-// which Date() would misread as local time. Normalize anything lacking a timezone
-// designator to UTC before comparing.
-function toUtcMs(s) {
-  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s).getTime();
-  const withSecs = /T\d{2}:\d{2}$/.test(s) ? s + ":00" : s;
-  return new Date(withSecs + "Z").getTime();
-}
-function minutesBetween(a, b) {
-  return Math.abs(toUtcMs(a) - toUtcMs(b)) / 60000;
-}
 
 async function main() {
   console.log("Fetching live observations…");
@@ -217,72 +222,60 @@ async function main() {
     console.error("No observations available — aborting.");
     process.exit(1);
   }
-  console.log(`Got ${obs.length} station observation(s). Sampling Open-Meteo at each…\n`);
-
   const validObs = obs.filter((o) => o.speedMs != null && o.lat != null && o.lon != null);
-  let models;
-  try {
-    models = await fetchOpenMeteoBatch(validObs);
-    if (models.length !== validObs.length) {
-      throw new Error(`returned ${models.length} results for ${validObs.length} points`);
+  console.log(`Got ${validObs.length} station observation(s). Querying ${MODELS.length} model(s)…\n`);
+
+  const pairs = [];
+  for (const model of MODELS) {
+    const results = await model.fetch(validObs, model.retries);
+    for (let i = 0; i < validObs.length; i++) {
+      const m = results[i];
+      if (!m || m.speedMs == null) continue;
+      const o = validObs[i];
+      const skew = minutesBetween(o.time, m.time);
+      pairs.push({
+        ts: new Date().toISOString(), model: model.name,
+        source: o.source, station: o.station, lat: o.lat, lon: o.lon,
+        obsTime: o.time, modelTime: m.time, skewMin: Math.round(skew),
+        obsSpeed: o.speedMs, modSpeed: m.speedMs, obsDir: o.dirDeg, modDir: m.dirDeg,
+        speedErr: m.speedMs - o.speedMs, dirErr: angDiff(m.dirDeg, o.dirDeg),
+        obsCat: cyclistCategory(o.speedMs), modCat: cyclistCategory(m.speedMs),
+        comparable: skew <= MAX_TIME_SKEW_MIN,
+      });
     }
-  } catch (e) {
-    // External endpoint flaky/throttled — not our bug. Skip this hour cleanly
-    // (exit 0) so the cron doesn't go red and get auto-disabled; next run retries.
-    console.warn(`\n⚠ No sample this run — Open-Meteo unreachable after retries: ${e.message}`);
-    console.warn("  (METAR/DMI observations were fine; only the model endpoint failed.)");
+  }
+
+  if (pairs.length === 0) {
+    console.warn("⚠ No model produced a comparison this run (all model endpoints down). Will retry next run.");
     await printAggregate();
     return;
   }
 
-  const pairs = [];
-  for (let idx = 0; idx < validObs.length; idx++) {
-    const o = validObs[idx];
-    const model = models[idx];
-    const skew = minutesBetween(o.time, model.time);
-    pairs.push({
-      ts: new Date().toISOString(),
-      source: o.source,
-      station: o.station,
-      lat: o.lat, lon: o.lon,
-      obsTime: o.time, modelTime: model.time, skewMin: Math.round(skew),
-      obsSpeed: o.speedMs, modSpeed: model.speedMs,
-      obsDir: o.dirDeg, modDir: model.dirDeg,
-      speedErr: model.speedMs - o.speedMs,
-      dirErr: angDiff(model.dirDeg, o.dirDeg),
-      obsCat: cyclistCategory(o.speedMs),
-      modCat: cyclistCategory(model.speedMs),
-      comparable: skew <= MAX_TIME_SKEW_MIN,
-    });
-  }
-
-  // ---- Per-station table for this run ----
-  console.log("Source  Station        skew  obs→model speed (m/s)   dir err   obs cat → model cat");
-  console.log("------  -------------  -----  -------------------------  -------  --------------------");
+  // ---- Per-pair table for this run ----
+  console.log("Model       Source  Station    skew  obs→model (m/s)   dir err   cat");
+  console.log("----------  ------  ---------  ----  ----------------  -------  -----");
   for (const p of pairs) {
     const dirErr = p.dirErr == null ? "  n/a" : `${p.dirErr.toFixed(0).padStart(4)}°`;
     const flag = p.comparable ? " " : "*";
     const catFlag = p.obsCat === p.modCat ? "✓" : "✗";
     console.log(
-      `${p.source.padEnd(6)}  ${String(p.station).padEnd(13)}  ${String(p.skewMin).padStart(3)}m${flag}  ` +
-      `${p.obsSpeed.toFixed(1).padStart(5)} → ${p.modSpeed.toFixed(1).padStart(5)}  (${(p.speedErr >= 0 ? "+" : "") + p.speedErr.toFixed(1)})`.padEnd(25) +
-      `  ${dirErr}    ${p.obsCat} → ${p.modCat} ${catFlag}`,
+      `${p.model.padEnd(10)}  ${p.source.padEnd(6)}  ${String(p.station).padEnd(9)}  ${String(p.skewMin).padStart(3)}m${flag}  ` +
+      `${p.obsSpeed.toFixed(1).padStart(5)} →${p.modSpeed.toFixed(1).padStart(5)} (${(p.speedErr >= 0 ? "+" : "") + p.speedErr.toFixed(1)})`.padEnd(16) +
+      `  ${dirErr}    ${catFlag}`,
     );
   }
-  console.log("  (* = obs/model >20 min apart, treat with caution)\n");
+  console.log("  (* = obs/model >40 min apart)\n");
 
-  // ---- Append to log, skipping observations already recorded ----
-  // Dedup key = source+station+observation-time, so re-running before a new
-  // obs arrives (METAR ~hourly) does not count the same reading twice.
+  // ---- Append, skipping pairs already recorded (model+station+obs-time) ----
   const existing = await readLog();
-  const seen = new Set(existing.map((p) => `${p.source}|${p.station}|${p.obsTime}`));
-  const fresh = pairs.filter((p) => !seen.has(`${p.source}|${p.station}|${p.obsTime}`));
+  const key = (p) => `${p.model || "open_meteo"}|${p.source}|${p.station}|${p.obsTime}`;
+  const seen = new Set(existing.map(key));
+  const fresh = pairs.filter((p) => !seen.has(key(p)));
   if (fresh.length > 0) {
     await appendFile(LOG_PATH, fresh.map((p) => JSON.stringify(p)).join("\n") + "\n", "utf-8");
   }
   console.log(`Logged ${fresh.length} new pair(s) (${pairs.length - fresh.length} already in log) → ${LOG_PATH}`);
 
-  // ---- Running aggregate over the whole log ----
   await printAggregate();
 }
 
@@ -301,46 +294,69 @@ function octant(deg) {
   return OCTANTS[Math.round(deg / 45) % 8];
 }
 
+function statsFor(rows) {
+  const n = rows.length;
+  const se = rows.map((p) => p.speedErr);
+  const bias = se.reduce((a, b) => a + b, 0) / n;
+  const mae = se.reduce((a, b) => a + Math.abs(b), 0) / n;
+  const rmse = Math.sqrt(se.reduce((a, b) => a + b * b, 0) / n);
+  const de = rows.map((p) => p.dirErr).filter((d) => d != null);
+  const dirMae = de.length ? de.reduce((a, b) => a + b, 0) / de.length : null;
+  const catAgree = rows.filter((p) => p.obsCat === p.modCat).length / n;
+  return { n, bias, mae, rmse, dirMae, catAgree };
+}
+
 async function printAggregate() {
   const all = await readLog();
   if (all.length === 0) return;
   const usable = all.filter((p) => p.comparable && p.obsSpeed != null && p.modSpeed != null);
   if (usable.length === 0) return;
 
-  const n = usable.length;
-  const speedErrs = usable.map((p) => p.speedErr);
-  const bias = speedErrs.reduce((a, b) => a + b, 0) / n;
-  const mae = speedErrs.reduce((a, b) => a + Math.abs(b), 0) / n;
-  const rmse = Math.sqrt(speedErrs.reduce((a, b) => a + b * b, 0) / n);
-
-  const dirErrs = usable.map((p) => p.dirErr).filter((d) => d != null);
-  const dirMae = dirErrs.length ? dirErrs.reduce((a, b) => a + b, 0) / dirErrs.length : null;
-
-  const catAgree = usable.filter((p) => p.obsCat === p.modCat).length / n;
+  // Group by model (older rows without a model field were Open-Meteo).
+  const byModel = new Map();
+  for (const p of usable) {
+    const m = p.model || "open_meteo";
+    if (!byModel.has(m)) byModel.set(m, []);
+    byModel.get(m).push(p);
+  }
 
   const span = `${all[0].ts.slice(0, 16)} … ${all[all.length - 1].ts.slice(0, 16)}`;
-  console.log("\n=== Running aggregate (whole log) ===");
-  console.log(`samples           : ${n}   (over ${span})`);
-  console.log(`speed bias        : ${bias >= 0 ? "+" : ""}${bias.toFixed(2)} m/s  (model − obs; + = model too windy)`);
-  console.log(`speed MAE / RMSE  : ${mae.toFixed(2)} / ${rmse.toFixed(2)} m/s`);
-  console.log(`direction MAE     : ${dirMae == null ? "n/a" : dirMae.toFixed(1) + "°"}`);
-  console.log(`cyclist-cat agree : ${(catAgree * 100).toFixed(0)}%  (model & obs land in same wind category)`);
+  console.log(`\n=== Running aggregate per model (over ${span}) ===`);
+  console.log("model        n   speed bias   MAE / RMSE     dir MAE   cat agree");
+  console.log("----------  ---  ----------   -----------    -------   ---------");
+  for (const [m, rows] of [...byModel].sort()) {
+    const s = statsFor(rows);
+    console.log(
+      `${m.padEnd(10)}  ${String(s.n).padStart(3)}  ` +
+      `${(s.bias >= 0 ? "+" : "") + s.bias.toFixed(2)} m/s`.padStart(10) + "   " +
+      `${s.mae.toFixed(2)} / ${s.rmse.toFixed(2)}`.padEnd(11) + "    " +
+      `${s.dirMae == null ? "n/a" : s.dirMae.toFixed(1) + "°"}`.padStart(6) + "    " +
+      `${(s.catAgree * 100).toFixed(0)}%`,
+    );
+  }
+  console.log("(bias: + = model too windy vs obs)");
 
-  // ---- Regime coverage: shows which conditions still need samples ----
-  const byCat = new Map();
-  for (const b of CYCLIST_BINS) byCat.set(b.name, 0);
+  // ---- Regime coverage over distinct observations (model-independent) ----
+  const seenObs = new Set();
+  const distinct = usable.filter((p) => {
+    const k = `${p.source}|${p.station}|${p.obsTime}`;
+    if (seenObs.has(k)) return false;
+    seenObs.add(k);
+    return true;
+  });
+  const byCat = new Map(CYCLIST_BINS.map((b) => [b.name, 0]));
   const byOct = new Map(OCTANTS.map((o) => [o, 0]));
-  for (const p of usable) {
+  for (const p of distinct) {
     byCat.set(p.obsCat, (byCat.get(p.obsCat) || 0) + 1);
     byOct.set(octant(p.obsDir), (byOct.get(octant(p.obsDir)) || 0) + 1);
   }
-  console.log("\nregime coverage (observed):");
+  console.log(`\nregime coverage (${distinct.length} distinct observations):`);
   console.log("  by speed : " + [...byCat].map(([k, v]) => `${k} ${v}`).join("  "));
   console.log("  by dir   : " + [...byOct].map(([k, v]) => `${k} ${v}`).join("  "));
 
-  if (n < 30) {
-    console.log(`\nNOTE: only ${n} samples — not yet statistically meaningful. Keep running hourly`);
-    console.log("until the coverage above spans calm→strong and several directions (~1–2 weeks).");
+  if (distinct.length < 30) {
+    console.log(`\nNOTE: only ${distinct.length} distinct obs — not yet statistically meaningful.`);
+    console.log("Keep collecting until coverage spans calm→strong and several directions.");
   }
 }
 
