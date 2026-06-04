@@ -325,6 +325,7 @@ function MapApp() {
           streetName={wayNames.get(String(activeTip.arrow.wayId)) ?? null}
           modifiedSpeedMs={activeTip.arrow.speedMs}
           travelDeg={activeTip.arrow.flowDeg}
+          bearingDeg={activeTip.arrow.bearingDeg}
           canyonH={activeTip.arrow.canyonH}
           canyonW={activeTip.arrow.canyonW}
           leftHeightM={activeTip.arrow.leftHeightM}

@@ -9,7 +9,7 @@
 // The carriageway width is derived from the OSM highway class, NOT the canyon
 // (building-to-building) width — that distinction is what keeps arrows on the road.
 
-import { magnitudeColor } from './colorMap';
+import { windBandColor } from '../cyclist/windCategory';
 import {
   computeSegmentCenterWind,
   type GeometrySource,
@@ -118,7 +118,7 @@ export function buildWindArrows(
 
     // One local wind vector for the whole segment (3D-canyon-modified).
     const lane = computeSegmentCenterWind(seg, wind);
-    const [cr, cg, cb] = magnitudeColor(lane.speedMs);
+    const [cr, cg, cb] = windBandColor(lane.speedMs);
     const speedFactor = clamp(lane.speedMs / SPEED_REF, MIN_SPEED_FACTOR, MAX_SPEED_FACTOR);
     const arrowSizeM = clamp(roadW * ARROW_WIDTH_FRACTION, MIN_ARROW_M, MAX_ARROW_M);
     const crossMarginM = roadW * CROSS_MARGIN_FRACTION;

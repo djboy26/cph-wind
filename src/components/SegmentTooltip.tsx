@@ -1,5 +1,6 @@
 // src/components/SegmentTooltip.tsx
 import type { GeometrySource } from "../math";
+import { windBand, streetImpact, type RGB } from "../cyclist/windCategory";
 
 interface Props {
   x: number;
@@ -7,6 +8,8 @@ interface Props {
   streetName: string | null;
   modifiedSpeedMs: number;
   travelDeg: number;
+  /** Street axis A→B, deg CW from N — needed for head/tailwind decomposition. */
+  bearingDeg: number;
   canyonH: number;
   canyonW: number;
   leftHeightM: number;
@@ -23,6 +26,19 @@ function compassPoint(deg: number): string {
   return points[Math.round(deg / 45) % 8];
 }
 
+function rgbCss(c: RGB): string {
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
+function Chip({ color, label }: { color: RGB; label: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+      <span style={{ width: 9, height: 9, borderRadius: 2, background: rgbCss(color), flex: "0 0 auto" }} />
+      <span style={{ fontWeight: 600 }}>{label}</span>
+    </span>
+  );
+}
+
 const SOURCE_LABELS: Record<GeometrySource, string> = {
   measured: "measured from building walls",
   partial: "partial (one open side)",
@@ -30,10 +46,12 @@ const SOURCE_LABELS: Record<GeometrySource, string> = {
 };
 
 export default function SegmentTooltip({
-  x, y, streetName, modifiedSpeedMs, travelDeg, canyonH, canyonW,
+  x, y, streetName, modifiedSpeedMs, travelDeg, bearingDeg, canyonH, canyonW,
   leftHeightM, rightHeightM, geometrySource, laneIndex, laneCount,
   variant, onClose,
 }: Props) {
+  const strength = windBand(modifiedSpeedMs);
+  const impact = streetImpact(modifiedSpeedMs, travelDeg, bearingDeg);
   const lambda = canyonW > 0 ? canyonH / canyonW : 0;
   const regime =
     lambda < 0.1 ? "no canyon (open)" :
@@ -84,13 +102,40 @@ export default function SegmentTooltip({
         </div>
       )}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-        <span style={{ color: "#666" }}>Wind along here</span>
-        <span style={{ fontWeight: 600 }}>{modifiedSpeedMs.toFixed(1)} m/s</span>
+        <span style={{ color: "#666" }}>Wind on street</span>
+        <span>
+          <span style={{ fontWeight: 600 }}>{modifiedSpeedMs.toFixed(1)} m/s</span>
+          <span style={{ marginLeft: 6 }}><Chip color={strength.color} label={strength.label} /></span>
+        </span>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-        <span style={{ color: "#666" }}>Direction</span>
+        <span style={{ color: "#666" }}>Blowing toward</span>
         <span>{compassPoint(travelDeg)} ({Math.round(travelDeg)}°)</span>
       </div>
+
+      {/* Route impact: head/tailwind for each direction of travel */}
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #eee", fontSize: 12 }}>
+        <div style={{ color: "#888", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>
+          For your route
+        </div>
+        {impact.alongMs < 0.5 ? (
+          <div style={{ color: "#666" }}>
+            Crosswind — little head/tailwind either way ({impact.alongMs.toFixed(1)} m/s along the street).
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+              <span style={{ color: "#666" }}>Riding {compassPoint(impact.favorableBearingDeg)}</span>
+              <Chip color={impact.favorable.color} label={`${impact.favorable.label} ${impact.alongMs.toFixed(1)}`} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ color: "#666" }}>Riding {compassPoint((impact.favorableBearingDeg + 180) % 360)}</span>
+              <Chip color={impact.against.color} label={`${impact.against.label} ${impact.alongMs.toFixed(1)}`} />
+            </div>
+          </>
+        )}
+      </div>
+
       <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #eee", fontSize: 11, color: "#666" }}>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span>Left wall H</span><span>{leftHeightM.toFixed(0)} m</span>
