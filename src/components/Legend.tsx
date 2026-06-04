@@ -48,7 +48,7 @@ export default function Legend({ isMobile }: { isMobile: boolean }) {
               style={{
                 width: 13, height: 13, borderRadius: 4, flex: "0 0 auto",
                 background: `rgb(${b.color[0]},${b.color[1]},${b.color[2]})`,
-                boxShadow: "0 0 0 1px rgba(255,255,255,0.08)",
+                boxShadow: "0 0 0 1px rgba(28,39,51,0.12)",
               }}
             />
             <span style={{ fontSize: 11.5, fontWeight: 600, width: 74, color: COLORS.text }}>{b.label}</span>

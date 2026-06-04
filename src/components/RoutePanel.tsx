@@ -120,8 +120,8 @@ export default function RoutePanel({
               onClick={() => onSelect(o.id)}
               style={{
                 textAlign: "left",
-                border: sel ? "1.5px solid rgba(91,157,255,0.7)" : `1px solid ${COLORS.line}`,
-                background: sel ? "rgba(91,157,255,0.14)" : "rgba(255,255,255,0.03)",
+                border: sel ? "1.5px solid rgba(46,124,246,0.65)" : `1px solid ${COLORS.line}`,
+                background: sel ? "rgba(46,124,246,0.10)" : "rgba(28,39,51,0.03)",
                 borderRadius: 12,
                 padding: "9px 11px",
                 cursor: "pointer",

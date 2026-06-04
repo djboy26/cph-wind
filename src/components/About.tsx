@@ -18,7 +18,7 @@ export default function About({ open, onClose }: { open: boolean; onClose: () =>
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.55)",
+            background: "rgba(22,31,43,0.4)",
             backdropFilter: "blur(3px)",
             WebkitBackdropFilter: "blur(3px)",
             zIndex: 100,

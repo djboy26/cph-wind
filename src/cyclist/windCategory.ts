@@ -27,13 +27,15 @@ export interface WindBand {
   blurb: string;
 }
 
+// Cool→hot sequential ramp, tuned for contrast and harmony on the warm-white
+// Daylight canvas (the calm grey of the old dark theme would vanish here).
 export const WIND_BANDS: WindBand[] = [
-  { key: "calm", label: "Calm", minMs: 0, maxMs: 2, color: [176, 180, 186], blurb: "Wind is not a factor." },
-  { key: "light", label: "Light", minMs: 2, maxMs: 4, color: [95, 175, 110], blurb: "Easy riding; a slight push or resistance." },
-  { key: "moderate", label: "Moderate", minMs: 4, maxMs: 6, color: [235, 200, 45], blurb: "Noticeable effort into a headwind." },
-  { key: "strong", label: "Strong", minMs: 6, maxMs: 9, color: [235, 130, 40], blurb: "Hard work into a headwind; affects pace." },
-  { key: "very_strong", label: "Very strong", minMs: 9, maxMs: 12, color: [212, 50, 50], blurb: "Tough; gusts can affect balance." },
-  { key: "severe", label: "Severe", minMs: 12, maxMs: Infinity, color: [150, 35, 95], blurb: "Hazardous — consider avoiding." },
+  { key: "calm", label: "Calm", minMs: 0, maxMs: 2, color: [99, 148, 166], blurb: "Wind is not a factor." },
+  { key: "light", label: "Light", minMs: 2, maxMs: 4, color: [60, 165, 120], blurb: "Easy riding; a slight push or resistance." },
+  { key: "moderate", label: "Moderate", minMs: 4, maxMs: 6, color: [224, 168, 38], blurb: "Noticeable effort into a headwind." },
+  { key: "strong", label: "Strong", minMs: 6, maxMs: 9, color: [228, 118, 40], blurb: "Hard work into a headwind; affects pace." },
+  { key: "very_strong", label: "Very strong", minMs: 9, maxMs: 12, color: [212, 58, 52], blurb: "Tough; gusts can affect balance." },
+  { key: "severe", label: "Severe", minMs: 12, maxMs: Infinity, color: [158, 46, 104], blurb: "Hazardous — consider avoiding." },
 ];
 
 /** Strength band for a street-level wind speed (m/s). */
@@ -62,12 +64,12 @@ export interface RouteImpactBand {
 // Classified on the headwind component h (+ opposes travel, − aids it). The ±2 m/s
 // neutral band absorbs near-pure crosswinds (little along-route effect either way).
 export const ROUTE_IMPACTS: RouteImpactBand[] = [
-  { key: "strong_tailwind", label: "Strong tailwind", minMs: -Infinity, maxMs: -5, color: [40, 150, 90] },
-  { key: "tailwind", label: "Tailwind", minMs: -5, maxMs: -2, color: [120, 190, 120] },
-  { key: "neutral", label: "Neutral / crosswind", minMs: -2, maxMs: 2, color: [176, 180, 186] },
-  { key: "headwind", label: "Headwind", minMs: 2, maxMs: 5, color: [235, 150, 55] },
-  { key: "strong_headwind", label: "Strong headwind", minMs: 5, maxMs: 8, color: [225, 90, 45] },
-  { key: "severe_headwind", label: "Severe headwind", minMs: 8, maxMs: Infinity, color: [190, 35, 45] },
+  { key: "strong_tailwind", label: "Strong tailwind", minMs: -Infinity, maxMs: -5, color: [31, 140, 84] },
+  { key: "tailwind", label: "Tailwind", minMs: -5, maxMs: -2, color: [96, 178, 116] },
+  { key: "neutral", label: "Neutral / crosswind", minMs: -2, maxMs: 2, color: [120, 150, 165] },
+  { key: "headwind", label: "Headwind", minMs: 2, maxMs: 5, color: [224, 150, 52] },
+  { key: "strong_headwind", label: "Strong headwind", minMs: 5, maxMs: 8, color: [220, 92, 46] },
+  { key: "severe_headwind", label: "Severe headwind", minMs: 8, maxMs: Infinity, color: [188, 40, 52] },
 ];
 
 /** Route-impact band for a signed headwind component (+ = against travel). */

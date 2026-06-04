@@ -5,6 +5,7 @@ import DeckGL from "@deck.gl/react";
 import { PathLayer, ScatterplotLayer, PolygonLayer } from "@deck.gl/layers";
 import { WebMercatorViewport } from "@deck.gl/core";
 import { Map as MapLibreMap } from "react-map-gl/maplibre";
+import type * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import type { FeatureCollection } from "geojson";
@@ -42,8 +43,59 @@ interface HoverState {
 }
 
 const COPENHAGEN = { lat: 55.6761, lon: 12.5683 };
-const MAP_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+// "Daylight" — a clean light basemap, then recoloured at runtime (applyDaylight)
+// into a warm, Apple-Maps-daytime palette.
+const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 const MOBILE_BREAKPOINT = 768;
+
+// Daylight palette — warm paper land, soft sky water, sage parks, ivory buildings.
+const THEME = {
+  land: "#f3efe7",
+  water: "#a9d4e5",
+  park: "#cadbb7",
+  road: "#ffffff",
+  roadCasing: "#e7dfd0",
+  building: "#ece6db",
+  boundary: "#d9cfbe",
+  ink: "#46505f",
+  halo: "#f7f3ec",
+};
+const BUILDING_RGB: [number, number, number] = [236, 230, 219]; // matches THEME.building
+
+// Recolour the light basemap into the Daylight palette. Carto's gl styles use
+// well-named layers, so we classify by id/type and repaint role by role — robust
+// to the exact layer set, and far less code than authoring a full style.json.
+function applyDaylight(map: maplibregl.Map) {
+  const layers = map.getStyle()?.layers ?? [];
+  for (const l of layers) {
+    const id = l.id.toLowerCase();
+    const set = (prop: string, val: unknown) => {
+      try { map.setPaintProperty(l.id, prop as any, val as any); } catch { /* layer lacks prop */ }
+    };
+    try {
+      if (l.type === "background") { set("background-color", THEME.land); continue; }
+      if (id.includes("water") && !id.includes("name") && !id.includes("label")) {
+        set("fill-color", THEME.water); set("line-color", THEME.water); continue;
+      }
+      if (/(park|wood|grass|green|forest|landcover|pitch|cemetery|scrub|garden)/.test(id) && l.type === "fill") {
+        set("fill-color", THEME.park); set("fill-opacity", 0.85); continue;
+      }
+      if (id.includes("building") && l.type === "fill") {
+        set("fill-color", THEME.building); set("fill-opacity", 0.65); continue;
+      }
+      if (id.includes("boundary") && l.type === "line") { set("line-color", THEME.boundary); continue; }
+      if (/(road|street|bridge|tunnel|transit|rail|highway|path)/.test(id) && l.type === "line") {
+        set("line-color", id.includes("casing") || id.includes("outline") ? THEME.roadCasing : THEME.road);
+        continue;
+      }
+      if (l.type === "symbol") {
+        set("text-color", THEME.ink);
+        set("text-halo-color", THEME.halo);
+        set("text-halo-width", 1.3);
+      }
+    } catch { /* skip any uncooperative layer */ }
+  }
+}
 
 // Hard-lock the camera to Greater Copenhagen (data bounds + a little padding) so
 // the map can never wander off to another city or country.
@@ -365,9 +417,10 @@ function MapApp() {
           extruded: true,
           getPolygon: (d) => d[1],
           getElevation: (d) => d[0],
-          getFillColor: [42, 48, 60, 235],
+          getFillColor: [...BUILDING_RGB, 244],
           stroked: false,
-          material: { ambient: 0.55, diffuse: 0.6, shininess: 24, specularColor: [50, 60, 80] },
+          // Matte, warmly-lit ivory — soft daylight shading, no harsh speculars.
+          material: { ambient: 0.72, diffuse: 0.55, shininess: 8, specularColor: [60, 58, 52] },
           pickable: false,
         }),
       );
@@ -399,9 +452,9 @@ function MapApp() {
           data: ordered,
           getPath: (o) => o.coords,
           getColor: (o) =>
-            o.id === selectedRoute?.id ? [70, 150, 255, 255]
-            : o.id === bestId ? [70, 209, 138, 235]
-            : [165, 174, 186, 190],
+            o.id === selectedRoute?.id ? [46, 124, 246, 255]
+            : o.id === bestId ? [31, 157, 87, 240]
+            : [108, 122, 140, 205],
           getWidth: (o) => (o.id === selectedRoute?.id ? 7 : 4),
           widthUnits: "pixels",
           widthMinPixels: 3,
@@ -463,7 +516,7 @@ function MapApp() {
     : { position: "absolute", bottom: 16, right: 16, zIndex: 20 };
 
   return (
-    <div style={{ position: "relative", width: "100vw", height: "100vh", background: "#0e0f13", overflow: "hidden" }}>
+    <div style={{ position: "relative", width: "100vw", height: "100vh", background: THEME.land, overflow: "hidden" }}>
       <DeckGL
         initialViewState={initialViewState}
         viewState={viewState}
@@ -473,7 +526,11 @@ function MapApp() {
         getCursor={({ isDragging }) => (isDragging ? "grabbing" : routing ? "crosshair" : "grab")}
         onClick={onMapClick}
       >
-        <MapLibreMap reuseMaps mapStyle={MAP_STYLE} />
+        <MapLibreMap
+          reuseMaps
+          mapStyle={MAP_STYLE}
+          onLoad={(e: { target: maplibregl.Map }) => applyDaylight(e.target)}
+        />
       </DeckGL>
 
       <TopBar

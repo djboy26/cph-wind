@@ -111,7 +111,7 @@ export default function SegmentTooltip({
       </div>
 
       {/* Route impact: head/tailwind for each direction of travel */}
-      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.09)", fontSize: 12 }}>
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${COLORS.line}`, fontSize: 12 }}>
         <div style={{ color: COLORS.faint, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>
           For your route
         </div>
@@ -133,7 +133,7 @@ export default function SegmentTooltip({
         )}
       </div>
 
-      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.09)", fontSize: 11, color: COLORS.dim }}>
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${COLORS.line}`, fontSize: 11, color: COLORS.dim }}>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span>Left wall H</span><span>{leftHeightM.toFixed(0)} m</span>
         </div>

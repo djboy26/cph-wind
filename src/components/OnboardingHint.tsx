@@ -56,9 +56,9 @@ export default function OnboardingHint({ isMobile }: { isMobile: boolean }) {
         className="lift"
         onClick={dismiss}
         style={{
-          border: "1px solid rgba(91,157,255,0.5)",
-          background: "rgba(91,157,255,0.18)",
-          color: "#dce9ff",
+          border: "1px solid rgba(46,124,246,0.5)",
+          background: "rgba(46,124,246,0.12)",
+          color: "#1a52c9",
           borderRadius: 9,
           padding: "6px 14px",
           fontSize: 12.5,

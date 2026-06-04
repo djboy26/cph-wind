@@ -22,10 +22,10 @@ function WindDial({ deg, size = 30 }: { deg: number; size?: number }) {
   const r = size / 2 - 2;
   return (
     <svg width={size} height={size} aria-hidden style={{ flex: "0 0 auto" }}>
-      <circle cx={c} cy={c} r={r} fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.18)" strokeWidth={1} />
+      <circle cx={c} cy={c} r={r} fill="rgba(28,39,51,0.04)" stroke="rgba(28,39,51,0.22)" strokeWidth={1} />
       <g transform={`rotate(${deg} ${c} ${c})`}>
-        <polygon points={`${c},${c - r + 2} ${c - 3.2},${c + 2} ${c + 3.2},${c + 2}`} fill="#ff6b6b" />
-        <polygon points={`${c},${c + r - 2} ${c - 3.2},${c - 2} ${c + 3.2},${c - 2}`} fill="rgba(255,255,255,0.35)" />
+        <polygon points={`${c},${c - r + 2} ${c - 3.2},${c + 2} ${c + 3.2},${c + 2}`} fill="#e0533d" />
+        <polygon points={`${c},${c + r - 2} ${c - 3.2},${c - 2} ${c + 3.2},${c - 2}`} fill="rgba(28,39,51,0.4)" />
       </g>
     </svg>
   );
