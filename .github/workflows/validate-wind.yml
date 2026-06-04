@@ -1,0 +1,45 @@
+name: validate-wind
+
+# Accumulates wind-validation samples around the clock: every hour it compares
+# raw Open-Meteo against live METAR + DMI observations and commits the appended
+# validation-log.ndjson back to the repo. Pull it anytime with `git pull`.
+
+on:
+  schedule:
+    - cron: "0 * * * *" # hourly, UTC (GitHub may delay under load)
+  workflow_dispatch: {}   # allow manual runs from the Actions tab
+
+# Avoid overlapping runs racing on the same commit.
+concurrency:
+  group: validate-wind
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No `npm install`: the script depends only on Node built-ins + global fetch.
+      - name: Collect a validation sample
+        run: node scripts/validate-wind.mjs
+
+      - name: Commit log if it changed
+        run: |
+          if [[ -n "$(git status --porcelain validation-log.ndjson)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            git add validation-log.ndjson
+            git commit -m "chore: wind-validation sample [skip ci]"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          else
+            echo "No new samples to commit."
+          fi
