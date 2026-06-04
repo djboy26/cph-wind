@@ -156,13 +156,16 @@ export function planRoutes(
     bestWind: false,
   }));
 
-  // "Best for wind" = the route the wind treats best: the smallest wind time
-  // penalty (windDeltaS = time the wind costs(+)/saves(−)), independent of route
-  // length. Crosswind contributes ~0, headwind costs, tailwind saves — so this is
-  // not foolable by detours and matches the "saves/costs X min" shown per route.
-  // (Ranking by total wind-adjusted TIME instead would just pick the shortest
-  // route, since distance dominates — that is NOT "best wind-wise".)
-  options.sort((a, b) => a.metrics.windDeltaS - b.metrics.windDeltaS);
+  // "Best for wind" = least time spent riding INTO a real headwind.
+  //
+  // For a fixed start/destination the *net* headwind is identical on every route
+  // (it equals −wind·(B−A), a constant), so a route cannot escape the wind — and
+  // average headwind just scales as 1/length (longer routes dilute it). What a
+  // route CAN change is how much of the ride is spent grinding into the wind, i.e.
+  // headwindExposure. Rank by that; tie-break by the wind time penalty.
+  options.sort((a, b) =>
+    a.metrics.headwindExposure - b.metrics.headwindExposure ||
+    a.metrics.windDeltaS - b.metrics.windDeltaS);
   if (options.length > 0) options[0].bestWind = true;
   return options;
 }

@@ -31,17 +31,12 @@ function fmtKm(m: number) {
 function fmtMin(s: number) {
   return `${Math.round(s / 60)} min`;
 }
-function windDeltaLabel(deltaS: number) {
-  const m = Math.abs(deltaS) / 60;
-  if (m < 0.2) return { text: "wind neutral", color: "#666" };
-  return deltaS < 0
-    ? { text: `wind saves ${m.toFixed(1)} min`, color: "#1a7f37" }
-    : { text: `wind costs ${m.toFixed(1)} min`, color: "#b5480f" };
-}
-function headLabel(avgHeadwindMs: number) {
-  if (avgHeadwindMs > 0.3) return `${avgHeadwindMs.toFixed(1)} m/s headwind`;
-  if (avgHeadwindMs < -0.3) return `${(-avgHeadwindMs).toFixed(1)} m/s tailwind`;
-  return "crosswind";
+// "Wind suffered": the headwind the rider actually faces given their direction of
+// travel (+ headwind = suffering, − = tailwind helping).
+function windSuffered(avgHeadwindMs: number) {
+  if (avgHeadwindMs > 0.3) return { text: `${avgHeadwindMs.toFixed(1)} m/s headwind`, color: "#b5480f" };
+  if (avgHeadwindMs < -0.3) return { text: `${(-avgHeadwindMs).toFixed(1)} m/s tailwind`, color: "#1a7f37" };
+  return { text: "crosswind", color: "#666" };
 }
 
 const BTN: React.CSSProperties = {
@@ -74,12 +69,18 @@ export default function RoutePanel({
     null,
   );
 
+  // Routes between fixed points can't escape the net wind — flag when they're close.
+  const exposures = options.map((o) => o.metrics.headwindExposure);
+  const windSimilar =
+    options.length > 1 && Math.max(...exposures) - Math.min(...exposures) < 0.06;
+
   const status =
     !start ? "Click the map to set your start (or use GPS)." :
     !end ? "Now click your destination." :
     building ? "Preparing road network…" :
     options.length === 0 ? "No route found between those points." :
-    `${options.length} route${options.length > 1 ? "s" : ""} — best for wind is starred.`;
+    windSimilar ? `${options.length} routes — wind is similar on all (★ = least into-wind).` :
+    `${options.length} routes — ★ is best for wind (least into-wind).`;
 
   return (
     <div
@@ -113,7 +114,7 @@ export default function RoutePanel({
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {options.map((o, i) => {
           const sel = o.id === selectedId;
-          const delta = windDeltaLabel(o.metrics.windDeltaS);
+          const wind = windSuffered(o.metrics.avgHeadwindMs);
           return (
             <button
               key={o.id}
@@ -134,13 +135,14 @@ export default function RoutePanel({
                   {o.bestWind && <span style={{ color: "#1a7f37", marginLeft: 6, fontSize: 11 }}>Best for wind</span>}
                   {o.id === shortestId && !o.bestWind && <span style={{ color: "#666", marginLeft: 6, fontSize: 11 }}>Shortest</span>}
                 </span>
-                <span style={{ fontSize: 13, color: "#444" }}>{fmtKm(o.metrics.distanceM)} · {fmtMin(o.metrics.timeS)}</span>
               </div>
-              <div style={{ fontSize: 11, color: "#555", marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ color: delta.color, fontWeight: 600 }}>{delta.text}</span>
-                <span>{headLabel(o.metrics.avgHeadwindMs)}</span>
-                <span>{Math.round(o.metrics.headwindExposure * 100)}% into wind</span>
+              {/* Three criteria: time · wind suffered · % into wind */}
+              <div style={{ fontSize: 11, color: "#555", marginTop: 4, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
+                <span><span style={{ color: "#999" }}>time </span>{fmtMin(o.metrics.timeS)}</span>
+                <span><span style={{ color: "#999" }}>wind </span><span style={{ color: wind.color, fontWeight: 600 }}>{wind.text}</span></span>
+                <span><span style={{ color: "#999" }}>into wind </span>{Math.round(o.metrics.headwindExposure * 100)}%</span>
               </div>
+              <div style={{ fontSize: 10, color: "#999", marginTop: 2 }}>{fmtKm(o.metrics.distanceM)}</div>
             </button>
           );
         })}

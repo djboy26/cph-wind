@@ -130,11 +130,11 @@ describe('wind cost', () => {
 });
 
 describe('planRoutes', () => {
-  it('ranks by wind favourability (least wind penalty first) with one best-wind flag', () => {
+  it('ranks by least into-wind exposure with one best-wind flag', () => {
     const opts = planRoutes(G, node(0, 0), node(2, 2), { speedMs: 8, directionDeg: 0 });
     expect(opts.length).toBeGreaterThan(0);
     for (let i = 1; i < opts.length; i++) {
-      expect(opts[i].metrics.windDeltaS).toBeGreaterThanOrEqual(opts[i - 1].metrics.windDeltaS);
+      expect(opts[i].metrics.headwindExposure).toBeGreaterThanOrEqual(opts[i - 1].metrics.headwindExposure);
     }
     expect(opts.filter((o) => o.bestWind).length).toBe(1);
     expect(opts[0].bestWind).toBe(true);
