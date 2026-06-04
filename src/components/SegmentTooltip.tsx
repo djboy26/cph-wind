@@ -1,4 +1,6 @@
 // src/components/SegmentTooltip.tsx
+import type { GeometrySource } from "../math";
+
 interface Props {
   x: number;
   y: number;
@@ -7,6 +9,11 @@ interface Props {
   travelDeg: number;
   canyonH: number;
   canyonW: number;
+  leftHeightM: number;
+  rightHeightM: number;
+  geometrySource: GeometrySource;
+  laneIndex: number;
+  laneCount: number;
   variant: "cursor" | "sheet";
   onClose?: () => void;
 }
@@ -16,8 +23,16 @@ function compassPoint(deg: number): string {
   return points[Math.round(deg / 45) % 8];
 }
 
+const SOURCE_LABELS: Record<GeometrySource, string> = {
+  measured: "measured from building walls",
+  partial: "partial (one open side)",
+  fallback: "estimated (no nearby walls)",
+};
+
 export default function SegmentTooltip({
-  x, y, streetName, modifiedSpeedMs, travelDeg, canyonH, canyonW, variant, onClose,
+  x, y, streetName, modifiedSpeedMs, travelDeg, canyonH, canyonW,
+  leftHeightM, rightHeightM, geometrySource, laneIndex, laneCount,
+  variant, onClose,
 }: Props) {
   const lambda = canyonW > 0 ? canyonH / canyonW : 0;
   const regime =
@@ -63,6 +78,11 @@ export default function SegmentTooltip({
       <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 14 }}>
         {streetName ?? "Unnamed segment"}
       </div>
+      {laneCount > 1 && (
+        <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
+          Lane {laneIndex + 1} of {laneCount}
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
         <span style={{ color: "#666" }}>Wind along here</span>
         <span style={{ fontWeight: 600 }}>{modifiedSpeedMs.toFixed(1)} m/s</span>
@@ -73,15 +93,21 @@ export default function SegmentTooltip({
       </div>
       <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #eee", fontSize: 11, color: "#666" }}>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Buildings ~H</span><span>{canyonH.toFixed(0)} m</span>
+          <span>Left wall H</span><span>{leftHeightM.toFixed(0)} m</span>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Street width ~W</span><span>{canyonW.toFixed(0)} m</span>
+          <span>Right wall H</span><span>{rightHeightM.toFixed(0)} m</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <span>Street width W</span><span>{canyonW.toFixed(1)} m</span>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span>λ = H/W</span><span>{lambda.toFixed(2)}</span>
         </div>
         <div style={{ marginTop: 4, fontStyle: "italic" }}>{regime}</div>
+        <div style={{ marginTop: 4, fontSize: 10, color: "#999" }}>
+          Cross-section: {SOURCE_LABELS[geometrySource]}
+        </div>
       </div>
     </div>
   );

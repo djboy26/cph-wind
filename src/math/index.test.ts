@@ -1,6 +1,15 @@
 // src/math/index.test.ts
 import { describe, it, expect } from 'vitest';
-import { bearing, midpoint, streetLevelWind, resistance } from './index';
+import {
+  bearing,
+  midpoint,
+  streetLevelWind,
+  resistance,
+  offsetLonLat,
+  computeSegmentLanes,
+  computeSegmentCenterWind,
+  type SegmentInput,
+} from './index';
 
 // Copenhagen city hall — used as a real-world reference point for bearing tests
 const CPH = { lon: 12.5683, lat: 55.6761 };
@@ -94,5 +103,81 @@ describe('resistance', () => {
     const r2 = resistance(0, { speedMs: 10, directionDeg: 350 });
     expect(r1.headwindMs).toBeCloseTo(r2.headwindMs, 5);
     expect(r1.crosswindMs).toBeCloseTo(r2.crosswindMs, 5); // unsigned, so equal
+  });
+});
+
+const baseSegment = (overrides: Partial<SegmentInput> = {}): SegmentInput => ({
+  lon: 12.5683,
+  lat: 55.6761,
+  bearingDeg: 0,
+  segmentLengthM: 50,
+  widthM: 18,
+  leftDistM: 9,
+  rightDistM: 9,
+  leftHeightM: 18,
+  rightHeightM: 18,
+  canyonH: 18,
+  canyonW: 18,
+  laneOffsetsM: [-7.2, -3.6, 0, 3.6, 7.2],
+  geometrySource: 'measured',
+  ...overrides,
+});
+
+describe('offsetLonLat', () => {
+  it('returns midpoint when offset is zero', () => {
+    const mid = { lon: 12.5683, lat: 55.6761 };
+    expect(offsetLonLat(mid, 0, 0)).toEqual(mid);
+  });
+
+  it('offsets laterally perpendicular to bearing', () => {
+    const mid = { lon: 12.5683, lat: 55.6761 };
+    const left = offsetLonLat(mid, 0, -10);
+    expect(left.lon).toBeLessThan(mid.lon);
+    expect(left.lat).toBeCloseTo(mid.lat, 4);
+  });
+});
+
+describe('computeSegmentLanes', () => {
+  const northWind = { speedMs: 10, directionDeg: 0 };
+
+  it('returns five lanes', () => {
+    const lanes = computeSegmentLanes(baseSegment(), northWind);
+    expect(lanes).toHaveLength(5);
+  });
+
+  it('symmetric canyon: all lanes have similar speed', () => {
+    const lanes = computeSegmentLanes(baseSegment(), northWind);
+    const speeds = lanes.map((l) => l.speedMs);
+    expect(Math.max(...speeds) - Math.min(...speeds)).toBeLessThan(2);
+  });
+
+  it('asymmetric canyon: edge lanes differ from center', () => {
+    const seg = baseSegment({
+      leftHeightM: 30,
+      rightHeightM: 6,
+      canyonH: 18,
+    });
+    const lanes = computeSegmentLanes(seg, { speedMs: 10, directionDeg: 90 });
+    expect(lanes[0].speedMs).not.toBeCloseTo(lanes[4].speedMs, 0);
+  });
+
+  it('open field (no buildings): returns ambient-like speeds', () => {
+    const seg = baseSegment({
+      leftHeightM: 0,
+      rightHeightM: 0,
+      canyonH: 0,
+    });
+    const lanes = computeSegmentLanes(seg, northWind);
+    for (const lane of lanes) {
+      expect(lane.speedMs).toBeCloseTo(10, 1);
+    }
+  });
+
+  it('center wind matches middle lane', () => {
+    const seg = baseSegment();
+    const lanes = computeSegmentLanes(seg, northWind);
+    const center = computeSegmentCenterWind(seg, northWind);
+    expect(center.speedMs).toBeCloseTo(lanes[2].speedMs, 5);
+    expect(center.flowDeg).toBeCloseTo(lanes[2].flowDeg, 5);
   });
 });

@@ -55,6 +55,7 @@ async function main() {
         name: tags.name ?? null,
         highway: tags.highway ?? null,
         cycleway: tags.cycleway ?? null,
+        width: tags.width ?? null,
       },
     };
   });

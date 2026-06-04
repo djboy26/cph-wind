@@ -173,3 +173,134 @@ export function canyonModifiedWind(
     gustMs: ambientWind.gustMs !== undefined ? ambientWind.gustMs * gustScale : undefined,
   };
 }
+
+export type GeometrySource = 'measured' | 'partial' | 'fallback';
+
+export interface StreetCrossSection {
+  widthM: number;
+  leftDistM: number;
+  rightDistM: number;
+  leftHeightM: number;
+  rightHeightM: number;
+  laneOffsetsM: number[];
+}
+
+export interface LaneWind {
+  offsetM: number;
+  speedMs: number;
+  /** Compass direction (deg CW from N) the wind flows at this lane. */
+  flowDeg: number;
+}
+
+export interface SegmentInput {
+  lon: number;
+  lat: number;
+  bearingDeg: number;
+  segmentLengthM: number;
+  widthM: number;
+  leftDistM: number;
+  rightDistM: number;
+  leftHeightM: number;
+  rightHeightM: number;
+  canyonH: number;
+  canyonW: number;
+  laneOffsetsM: number[];
+  geometrySource: GeometrySource;
+}
+
+const MPER_DEG_LAT = 111_000;
+
+/** Lateral offset in meters (+ = right of travel) from midpoint lon/lat. */
+export function offsetLonLat(mid: LonLat, bearingDeg: number, offsetM: number): LonLat {
+  const brgRad = bearingDeg * DEG;
+  const mPerDegLon = MPER_DEG_LAT * Math.cos(mid.lat * DEG);
+  const eastM = offsetM * Math.cos(brgRad);
+  const northM = -offsetM * Math.sin(brgRad);
+  return {
+    lon: mid.lon + eastM / mPerDegLon,
+    lat: mid.lat + northM / MPER_DEG_LAT,
+  };
+}
+
+/** Offset along street bearing from midpoint (for flow animation). */
+export function offsetAlongBearing(mid: LonLat, bearingDeg: number, alongM: number): LonLat {
+  const brgRad = bearingDeg * DEG;
+  const mPerDegLon = MPER_DEG_LAT * Math.cos(mid.lat * DEG);
+  const eastM = Math.sin(brgRad) * alongM;
+  const northM = Math.cos(brgRad) * alongM;
+  return {
+    lon: mid.lon + eastM / mPerDegLon,
+    lat: mid.lat + northM / MPER_DEG_LAT,
+  };
+}
+
+function wallHeightAtOffset(cross: StreetCrossSection, offsetM: number): number {
+  const span = cross.leftDistM + cross.rightDistM;
+  if (span <= 0) return (cross.leftHeightM + cross.rightHeightM) / 2;
+  const t = (offsetM + cross.leftDistM) / span;
+  const clamped = Math.max(0, Math.min(1, t));
+  return cross.leftHeightM * (1 - clamped) + cross.rightHeightM * clamped;
+}
+
+function laneLocalCanyon(cross: StreetCrossSection, offsetM: number): CanyonGeometry {
+  const distLeft = cross.leftDistM + offsetM;
+  const distRight = cross.rightDistM - offsetM;
+  const localWidth = Math.max(distLeft, 0.5) + Math.max(distRight, 0.5);
+  const heightM = wallHeightAtOffset(cross, offsetM);
+  return { heightM, widthM: localWidth };
+}
+
+function windToFlowDeg(wind: Wind): number {
+  return (wind.directionDeg + 180) % 360;
+}
+
+/**
+ * Compute modified wind at a single lateral lane position using lane-local
+ * canyon geometry (asymmetric walls, position-dependent width and height).
+ */
+export function asymmetricCanyonWindAtLane(
+  streetBearingDeg: number,
+  cross: StreetCrossSection,
+  offsetM: number,
+  ambientWind: Wind,
+): LaneWind {
+  const canyon = laneLocalCanyon(cross, offsetM);
+  const modified = canyonModifiedWind(streetBearingDeg, canyon, ambientWind);
+  return {
+    offsetM,
+    speedMs: modified.speedMs,
+    flowDeg: windToFlowDeg(modified),
+  };
+}
+
+/** Compute wind vectors for all lane sample points on a segment. */
+export function computeSegmentLanes(
+  segment: SegmentInput,
+  ambientWind: Wind,
+): LaneWind[] {
+  const cross: StreetCrossSection = {
+    widthM: segment.widthM,
+    leftDistM: segment.leftDistM,
+    rightDistM: segment.rightDistM,
+    leftHeightM: segment.leftHeightM,
+    rightHeightM: segment.rightHeightM,
+    laneOffsetsM: segment.laneOffsetsM,
+  };
+  return segment.laneOffsetsM.map((offsetM) =>
+    asymmetricCanyonWindAtLane(segment.bearingDeg, cross, offsetM, ambientWind),
+  );
+}
+
+/** Center-lane wind (lane index 2) for summary / single-arrow mode. */
+export function computeSegmentCenterWind(segment: SegmentInput, ambientWind: Wind): LaneWind {
+  const centerOffset = segment.laneOffsetsM[2] ?? 0;
+  const cross: StreetCrossSection = {
+    widthM: segment.widthM,
+    leftDistM: segment.leftDistM,
+    rightDistM: segment.rightDistM,
+    leftHeightM: segment.leftHeightM,
+    rightHeightM: segment.rightHeightM,
+    laneOffsetsM: segment.laneOffsetsM,
+  };
+  return asymmetricCanyonWindAtLane(segment.bearingDeg, cross, centerOffset, ambientWind);
+}

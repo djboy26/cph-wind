@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "data:rebuild": "node scripts/fetch-osm.mjs && node scripts/fetch-buildings.mjs && node scripts/compute-cross-sections.mjs",
+    "data:validate": "node scripts/validate-cross-sections.mjs"
   },
   "dependencies": {
     "@deck.gl/layers": "^9.3.2",

@@ -82,12 +82,20 @@ export default function About() {
             <h3 style={{ fontSize: 15, marginTop: 18, marginBottom: 6 }}>How the wind is calculated</h3>
             <p style={{ margin: "6px 0" }}>
               The regional wind (one value, updated every 10 minutes) comes from Open-Meteo's 10-metre
-              forecast. For each street segment, we project that wind onto the street's axis and
-              apply an urban canyon model (Soulhac et al., 2008): wind parallel to a street with tall
-              flanking buildings is amplified (channeling), wind perpendicular is attenuated
-              (skimming flow blocks it at street level). The result is a per-street modified wind
-              vector — arrow direction shows where the air is flowing along that street; arrow
-              colour shows its magnitude.
+              forecast. For each street segment, we measure the local cross-section from OpenStreetMap
+              building footprints: perpendicular rays from the street centreline find the nearest
+              left and right building walls, giving measured street width and flanking wall heights.
+            </p>
+            <p style={{ margin: "6px 0" }}>
+              At five points across the street width, we apply an urban canyon model (Soulhac et al.,
+              2008): wind parallel to the street is amplified (channeling), wind perpendicular is
+              attenuated (skimming flow). Each lane gets its own modified wind vector based on
+              local distance to the nearest wall and interpolated wall height. Animated arrows show
+              wind flow direction; colour shows speed.
+            </p>
+            <p style={{ margin: "6px 0", fontSize: 13, color: "#555" }}>
+              Zoom in to see five arrows side-by-side per street (zoom ≥ 15). At zoom 13–14 a single
+              centre arrow is shown. Below zoom 13 arrows are hidden for clarity.
             </p>
 
             <h3 style={{ fontSize: 15, marginTop: 18, marginBottom: 6 }}>What it doesn't model</h3>
@@ -100,10 +108,10 @@ export default function About() {
 
             <h3 style={{ fontSize: 15, marginTop: 18, marginBottom: 6 }}>Data quality</h3>
             <p style={{ margin: "6px 0" }}>
-              Roads and building footprints come from OpenStreetMap. About 88% of buildings in
-              the dataset lack explicit height tags and fall back to type-based estimates (typically
-              9 m for residential). The canyon model produces direction variation reliably; magnitude
-              estimates carry this height uncertainty.
+              Roads and building footprints come from OpenStreetMap. Cross-sections are classified as
+              measured (both walls found), partial (one open side), or fallback (no nearby walls —
+              uses highway-type width estimates). About 88% of buildings lack explicit height tags
+              and fall back to type-based estimates (typically 9 m for residential).
             </p>
 
             <h3 style={{ fontSize: 15, marginTop: 18, marginBottom: 6 }}>Data & attribution</h3>

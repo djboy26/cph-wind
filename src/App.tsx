@@ -1,37 +1,25 @@
 // src/App.tsx
-import { Component, useEffect, useMemo, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import DeckGL from "@deck.gl/react";
-import { GeoJsonLayer, IconLayer } from "@deck.gl/layers";
+import { GeoJsonLayer } from "@deck.gl/layers";
+import { WebMercatorViewport } from "@deck.gl/core";
 import { Map as MapLibreMap } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import type { FeatureCollection } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
-import { magnitudeColor } from "./layers/colorMap";
-import { canyonModifiedWind } from "./math";
-import WindCard from "./components/WindCard";
+import { arrowDensityForZoom, buildWindArrows, roadWidthForHighway, type RawSegment } from "./layers/buildWindArrows";
+import { createWindFlowLayer, type WindArrowInstance } from "./layers/WindFlowLayer";
+import WindCard from "./components/Windcard";
 import Legend from "./components/Legend";
 import SegmentTooltip from "./components/SegmentTooltip";
 import About from "./components/About";
 
-interface Segment {
-  wayId: string | number | undefined;
-  lon: number;
-  lat: number;
-  bearingDeg: number;
-  canyonH: number;
-  canyonW: number;
-}
-interface SegmentWithWind extends Segment {
-  modifiedSpeedMs: number;
-  travelDeg: number;
-  color: [number, number, number, number];
-}
 interface HoverState {
   x: number;
   y: number;
-  segment: SegmentWithWind;
+  arrow: WindArrowInstance;
 }
 
 const COPENHAGEN = { lat: 55.6761, lon: 12.5683 };
@@ -48,6 +36,41 @@ function useIsMobile() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
   return isMobile;
+}
+
+// Continuously increasing seconds (wrapped well above any animation cycle).
+// The WindFlowLayer derives per-arrow drift from this, so keeping it smooth and
+// unwrapped avoids visible jumps when arrows animate at different rates.
+function useFlowPhase() {
+  const [flowPhase, setFlowPhase] = useState(0);
+  const rafRef = useRef<number>(0);
+
+  useEffect(() => {
+    let last = performance.now();
+    const tick = (now: number) => {
+      const dt = now - last;
+      last = now;
+      setFlowPhase((p) => (p + dt / 1000) % 3600);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  return flowPhase;
+}
+
+function useWindowSize() {
+  const [size, setSize] = useState(() => ({
+    width: typeof window !== "undefined" ? window.innerWidth : 1280,
+    height: typeof window !== "undefined" ? window.innerHeight : 800,
+  }));
+  useEffect(() => {
+    const onResize = () => setSize({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return size;
 }
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -79,8 +102,16 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
+// Snap raw bounds to a coarse grid so arrows only rebuild when the view moves a
+// meaningful amount, not on every pan frame.
+const SNAP_DEG = 0.004;
+const BOUNDS_PAD = 0.25;
+const MAX_SPAN_DEG = 0.12;
+
 function MapApp() {
   const isMobile = useIsMobile();
+  const flowPhase = useFlowPhase();
+  const windowSize = useWindowSize();
 
   const initialViewState = useMemo(() => ({
     longitude: COPENHAGEN.lon,
@@ -90,12 +121,14 @@ function MapApp() {
     bearing: 0,
   }), [isMobile]);
 
+  const [viewState, setViewState] = useState(initialViewState);
+
   const { data: windResult, loading: windLoading, error: windError } = useCurrentWind(
     COPENHAGEN.lat, COPENHAGEN.lon,
   );
 
   const [roads, setRoads] = useState<FeatureCollection | null>(null);
-  const [segments, setSegments] = useState<Segment[] | null>(null);
+  const [segments, setSegments] = useState<RawSegment[] | null>(null);
   const [dataError, setDataError] = useState<Error | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
   const [pinned, setPinned] = useState<HoverState | null>(null);
@@ -125,19 +158,74 @@ function MapApp() {
     return m;
   }, [roads]);
 
-  const segmentsWithWind = useMemo<SegmentWithWind[]>(() => {
-    if (!segments || !windResult) return [];
-    return segments.map((s) => {
-      const cw = canyonModifiedWind(
-        s.bearingDeg,
-        { heightM: s.canyonH, widthM: s.canyonW },
-        windResult.wind,
-      );
-      const travelDeg = (cw.directionDeg + 180) % 360;
-      const [r, g, b] = magnitudeColor(cw.speedMs);
-      return { ...s, modifiedSpeedMs: cw.speedMs, travelDeg, color: [r, g, b, 255] };
+  // Carriageway width per way, from the OSM highway class — used to confine arrows
+  // to the road (the segments' stored width is the building-to-building canyon gap).
+  const wayHighways = useMemo(() => {
+    if (!roads) return new Map<string, string>();
+    const m = new Map<string, string>();
+    for (const f of roads.features) {
+      const p: any = f.properties || {};
+      if (p.id != null && p.highway) m.set(String(p.id), p.highway);
+    }
+    return m;
+  }, [roads]);
+
+  const enrichedSegments = useMemo(() => {
+    if (!segments) return null;
+    return segments.map((s) => ({
+      ...s,
+      roadWidthM: roadWidthForHighway(wayHighways.get(String(s.wayId)), s.widthM ?? s.canyonW),
+    }));
+  }, [segments, wayHighways]);
+
+  const zoom = viewState.zoom ?? initialViewState.zoom;
+  const density = arrowDensityForZoom(zoom);
+
+  // Padded, snapped viewport box (as a stable string key). Recomputed every frame
+  // but only changes value when the view moves across a snap cell.
+  const boundsKey = useMemo(() => {
+    if (density === "hidden") return null;
+    const vp = new WebMercatorViewport({
+      width: windowSize.width,
+      height: windowSize.height,
+      longitude: viewState.longitude,
+      latitude: viewState.latitude,
+      zoom: viewState.zoom,
+      pitch: viewState.pitch ?? 0,
+      bearing: viewState.bearing ?? 0,
     });
-  }, [segments, windResult]);
+    let [west, south, east, north] = vp.getBounds();
+    const padX = (east - west) * BOUNDS_PAD;
+    const padY = (north - south) * BOUNDS_PAD;
+    west -= padX; east += padX; south -= padY; north += padY;
+    // Clamp span — a steep pitch can stretch bounds toward the horizon.
+    if (east - west > MAX_SPAN_DEG) {
+      const cx = (east + west) / 2;
+      west = cx - MAX_SPAN_DEG / 2; east = cx + MAX_SPAN_DEG / 2;
+    }
+    if (north - south > MAX_SPAN_DEG) {
+      const cy = (north + south) / 2;
+      south = cy - MAX_SPAN_DEG / 2; north = cy + MAX_SPAN_DEG / 2;
+    }
+    west = Math.floor(west / SNAP_DEG) * SNAP_DEG;
+    south = Math.floor(south / SNAP_DEG) * SNAP_DEG;
+    east = Math.ceil(east / SNAP_DEG) * SNAP_DEG;
+    north = Math.ceil(north / SNAP_DEG) * SNAP_DEG;
+    return `${west.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${north.toFixed(4)}`;
+  }, [density, windowSize.width, windowSize.height, viewState.longitude, viewState.latitude, viewState.zoom, viewState.pitch, viewState.bearing]);
+
+  const windArrows = useMemo(() => {
+    if (!enrichedSegments || !windResult || !boundsKey) return [];
+    const [west, south, east, north] = boundsKey.split(",").map(Number);
+    const visible = enrichedSegments.filter(
+      (s) => s.lon >= west && s.lon <= east && s.lat >= south && s.lat <= north,
+    );
+    return buildWindArrows(visible, windResult.wind, density);
+  }, [enrichedSegments, windResult, density, boundsKey]);
+
+  const onViewStateChange = useCallback(({ viewState: vs }: { viewState: Record<string, unknown> }) => {
+    setViewState(vs as typeof viewState);
+  }, []);
 
   const layers = useMemo(() => {
     if (!roads) return [];
@@ -151,35 +239,23 @@ function MapApp() {
         pickable: false,
       }),
     ];
-    if (segmentsWithWind.length > 0) {
+    if (windArrows.length > 0) {
       result.push(
-        new IconLayer<SegmentWithWind>({
-          id: "wind-arrows",
-          data: segmentsWithWind,
-          getIcon: () => "arrow",
-          iconAtlas: "/arrow.svg",
-          iconMapping: { arrow: { x: 0, y: 0, width: 64, height: 64, anchorX: 32, anchorY: 32, mask: true } },
-          sizeUnits: "meters",
-          getSize: 40,
-          sizeMinPixels: 14,
-          sizeMaxPixels: 50,
-          getPosition: (d) => [d.lon, d.lat],
-          getAngle: (d) => 90 - d.travelDeg,
-          getColor: (d) => d.color,
-          pickable: true,
-          billboard: false,
-          onHover: isMobile ? undefined : (info: any) => {
-            setHover(info.object ? { x: info.x, y: info.y, segment: info.object } : null);
+        createWindFlowLayer({
+          data: windArrows,
+          flowPhase,
+          onHover: isMobile ? undefined : (info) => {
+            setHover(info.object ? { x: info.x, y: info.y, arrow: info.object } : null);
           },
-          onClick: (info: any) => {
-            if (info.object) setPinned({ x: info.x, y: info.y, segment: info.object });
+          onClick: (info) => {
+            if (info.object) setPinned({ x: info.x, y: info.y, arrow: info.object });
             return true;
           },
         }),
       );
     }
     return result;
-  }, [roads, segmentsWithWind, isMobile]);
+  }, [roads, windArrows, flowPhase, isMobile]);
 
   const stillLoading = !roads || !segments;
   const showWindError = windError && !windResult;
@@ -197,6 +273,8 @@ function MapApp() {
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
       <DeckGL
         initialViewState={initialViewState}
+        viewState={viewState}
+        onViewStateChange={onViewStateChange}
         controller={true}
         layers={layers}
         onClick={(info: any) => { if (!info.layer) setPinned(null); }}
@@ -229,7 +307,7 @@ function MapApp() {
           <WindCard
             wind={windResult.wind}
             timestamp={windResult.timestamp}
-            segmentCount={segmentsWithWind.length}
+            segmentCount={segments!.length}
           />
         )}
       </div>
@@ -244,11 +322,16 @@ function MapApp() {
         <SegmentTooltip
           x={activeTip.x}
           y={activeTip.y}
-          streetName={wayNames.get(String(activeTip.segment.wayId)) ?? null}
-          modifiedSpeedMs={activeTip.segment.modifiedSpeedMs}
-          travelDeg={activeTip.segment.travelDeg}
-          canyonH={activeTip.segment.canyonH}
-          canyonW={activeTip.segment.canyonW}
+          streetName={wayNames.get(String(activeTip.arrow.wayId)) ?? null}
+          modifiedSpeedMs={activeTip.arrow.speedMs}
+          travelDeg={activeTip.arrow.flowDeg}
+          canyonH={activeTip.arrow.canyonH}
+          canyonW={activeTip.arrow.canyonW}
+          leftHeightM={activeTip.arrow.leftHeightM}
+          rightHeightM={activeTip.arrow.rightHeightM}
+          geometrySource={activeTip.arrow.geometrySource}
+          laneIndex={activeTip.arrow.laneIndex}
+          laneCount={activeTip.arrow.laneCount}
           variant={isMobile ? "sheet" : "cursor"}
           onClose={() => setPinned(null)}
         />
