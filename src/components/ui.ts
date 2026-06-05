@@ -70,7 +70,11 @@ export const glass: CSSProperties = {
 export const pill: CSSProperties = {
   padding: "7px 13px",
   borderRadius: RADIUS.sm,
-  border: `1px solid ${COLORS.line}`,
+  // Longhand (not the `border` shorthand) so pillActive can override just the
+  // colour without React warning about mixing shorthand + non-shorthand.
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: COLORS.line,
   background: "rgba(20,32,43,0.04)",
   color: COLORS.text,
   cursor: "pointer",

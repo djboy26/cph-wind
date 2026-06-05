@@ -1,8 +1,10 @@
 // src/components/TopBar.tsx
-// Floating header: brand identity + live regional wind + primary actions.
+// Floating header: live regional wind + the primary "Plan route" action.
+// "Plan route" is a filled accent button (the one obvious call-to-action); on
+// mobile the live-wind block doubles as the brand so the CTA has room to be labelled.
 
 import type { Wind } from "../math";
-import { glass, pill, pillActive, COLORS, NUM } from "./ui";
+import { glass, pill, COLORS, NUM, FONT } from "./ui";
 import { Icon } from "./Icon";
 
 interface Props {
@@ -32,29 +34,14 @@ function WindDial({ deg, size = 30 }: { deg: number; size?: number }) {
   );
 }
 
-function Brand({ deg, compact }: { deg: number; compact: boolean }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <WindDial deg={deg} size={compact ? 26 : 32} />
-      <div style={{ lineHeight: 1.1 }}>
-        <div style={{ fontWeight: 700, fontSize: compact ? 14 : 15.5, letterSpacing: -0.3, color: COLORS.text }}>
-          Copenhagen Wind
-        </div>
-        {!compact && (
-          <div style={{ fontSize: 10.5, color: COLORS.faint, letterSpacing: 0.3 }}>live cycling wind map</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export default function TopBar({ wind, timestamp, loading, routingActive, onPlanRoute, onAbout, isMobile }: Props) {
   const deg = wind?.directionDeg ?? 0;
 
-  const liveWind = (
+  // Live wind: identity on desktop (sits beside the brand), and the brand itself on mobile.
+  const windBlock = (
     <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
       <span className="live-dot" />
-      <WindDial deg={deg} size={isMobile ? 24 : 30} />
+      <WindDial deg={deg} size={isMobile ? 26 : 30} />
       <div style={{ lineHeight: 1.12 }}>
         <div style={{ fontSize: isMobile ? 15 : 17, fontWeight: 700, letterSpacing: -0.3, color: COLORS.text, ...NUM }}>
           {loading || !wind ? "—" : wind.speedMs.toFixed(1)}
@@ -68,13 +55,22 @@ export default function TopBar({ wind, timestamp, loading, routingActive, onPlan
     </div>
   );
 
+  const brand = (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <WindDial deg={deg} size={32} />
+      <div style={{ lineHeight: 1.1 }}>
+        <div style={{ fontWeight: 700, fontSize: 15.5, letterSpacing: -0.3, color: COLORS.text }}>Copenhagen Wind</div>
+        <div style={{ fontSize: 10.5, color: COLORS.faint, letterSpacing: 0.3 }}>live cycling wind map</div>
+      </div>
+    </div>
+  );
+
   return (
     <header
       className="ui-down"
       style={{
         ...glass,
         position: "absolute",
-        // Clear the notch / status bar on phones (viewport-fit=cover).
         top: isMobile ? "calc(env(safe-area-inset-top) + 8px)" : 14,
         left: isMobile ? "calc(env(safe-area-inset-left) + 8px)" : 14,
         right: isMobile ? "calc(env(safe-area-inset-right) + 8px)" : 14,
@@ -87,26 +83,37 @@ export default function TopBar({ wind, timestamp, loading, routingActive, onPlan
         borderRadius: 16,
       }}
     >
-      <Brand deg={deg} compact={isMobile} />
+      {isMobile ? windBlock : brand}
 
       <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14 }}>
-        {!isMobile && liveWind}
-        {isMobile && (
-          <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.text, display: "flex", alignItems: "center", gap: 6, ...NUM }}>
-            <span className="live-dot" />
-            {loading || !wind ? "—" : `${wind.speedMs.toFixed(1)}`}
-            <span style={{ fontSize: 10, color: COLORS.faint, fontWeight: 500 }}>m/s {wind ? compassPoint(deg) : ""}</span>
-          </span>
-        )}
+        {!isMobile && windBlock}
+
+        {/* Primary call-to-action: filled accent so a new user can't miss where to start. */}
         <button
           className="lift"
           onClick={onPlanRoute}
-          aria-label="Plan route"
-          style={{ ...(routingActive ? pillActive : pill), display: "flex", alignItems: "center", gap: 7, padding: isMobile ? "8px 11px" : "8px 14px", fontWeight: 600, whiteSpace: "nowrap" }}
+          aria-label={routingActive ? "Close route planner" : "Plan a route"}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            whiteSpace: "nowrap",
+            cursor: "pointer",
+            fontFamily: FONT,
+            fontWeight: 700,
+            fontSize: isMobile ? 13 : 13.5,
+            padding: isMobile ? "9px 14px" : "9px 18px",
+            borderRadius: 999,
+            border: routingActive ? `1px solid ${COLORS.accentLine}` : "1px solid transparent",
+            background: routingActive ? COLORS.accentWash : COLORS.accent,
+            color: routingActive ? COLORS.accentInk : "#fff",
+            boxShadow: routingActive ? "none" : "0 3px 12px rgba(47,106,240,0.34)",
+          }}
         >
-          <Icon name="route" size={16} />
-          {!isMobile && "Plan route"}
+          <Icon name="route" size={16} color={routingActive ? COLORS.accentInk : "#fff"} />
+          {routingActive ? "Close" : "Plan route"}
         </button>
+
         <button
           className="lift"
           onClick={onAbout}
