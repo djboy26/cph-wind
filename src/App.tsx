@@ -10,6 +10,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import type { FeatureCollection } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
+import { reverseGeocode } from "./api/geocode";
 import { arrowDensityForZoom, buildWindArrows, roadWidthForHighway, type RawSegment } from "./layers/buildWindArrows";
 import { createWindFlowLayer, type WindArrowInstance } from "./layers/WindFlowLayer";
 import { rankRoutes, type RouteOption, type RankCriterion } from "./routing/windRoute";
@@ -204,15 +205,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 const SNAP_DEG = 0.004;
 const BOUNDS_PAD = 0.25;
 const MAX_SPAN_DEG = 0.12;
-// Phones get a hard arrow budget (the nearest-to-centre N) so per-frame work stays
-// tiny and touch handling never starves. Desktops render the full field.
-const MOBILE_ARROW_CAP = 220;
+// Phones get a generous arrow budget, thinned EVENLY across the viewport (not a
+// central cluster) so the wind field reads well while per-frame work stays bounded.
+const MOBILE_ARROW_CAP = 800;
 
 function MapApp() {
   const isMobile = useIsMobile();
-  // Animate at 20 fps on phones (a third of the per-frame React/layer work, leaving
-  // the main thread free for smooth taps & pans), 60 on desktop.
-  const flowPhase = useFlowPhase(isMobile ? 1000 / 20 : 0);
+  // 30 fps on phones (now that 3D is off there's headroom for a livelier field),
+  // 60 on desktop.
+  const flowPhase = useFlowPhase(isMobile ? 1000 / 30 : 0);
   const windowSize = useWindowSize();
 
   const initialViewState = useMemo(() => ({
@@ -241,6 +242,9 @@ function MapApp() {
   const [routing, setRouting] = useState(false);
   const [start, setStart] = useState<LatLon | null>(null);
   const [end, setEnd] = useState<LatLon | null>(null);
+  // Human-readable labels for the From/To fields (address or "My location").
+  const [startLabel, setStartLabel] = useState<string | null>(null);
+  const [endLabel, setEndLabel] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [criterion, setCriterion] = useState<RankCriterion>("recommended");
   const [gpsLoading, setGpsLoading] = useState(false);
@@ -305,7 +309,8 @@ function MapApp() {
     ?? rankedRoutes[0] ?? null;
 
   const resetRoute = useCallback(() => {
-    setStart(null); setEnd(null); setSelectedRouteId(null); setGpsError(null);
+    setStart(null); setEnd(null); setStartLabel(null); setEndLabel(null);
+    setSelectedRouteId(null); setGpsError(null);
   }, []);
 
   const toggleRouting = useCallback(() => {
@@ -313,14 +318,63 @@ function MapApp() {
     setPinned(null); setHover(null);
   }, []);
 
+  // Ease the camera to frame the chosen point(s): centre on one, fit-bounds on two.
+  const framePoints = useCallback((pts: LatLon[]) => {
+    if (pts.length === 0) return;
+    if (pts.length === 1) {
+      setViewState((vs) => constrainView({ ...vs, longitude: pts[0].lon, latitude: pts[0].lat, zoom: Math.max(vs.zoom ?? 14, 14) }));
+      return;
+    }
+    const lons = pts.map((p) => p.lon);
+    const lats = pts.map((p) => p.lat);
+    try {
+      const { longitude, latitude, zoom } = new WebMercatorViewport({
+        width: windowSize.width,
+        height: windowSize.height,
+      }).fitBounds(
+        [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+        { padding: isMobile ? 56 : 110 },
+      );
+      setViewState((vs) => constrainView({ ...vs, longitude, latitude, zoom: Math.min(zoom, MAX_ZOOM) }));
+    } catch { /* identical/degenerate points — leave the view as is */ }
+  }, [windowSize.width, windowSize.height, isMobile]);
+
+  // Best-effort: fill a waypoint's label with its nearest address after a tap/GPS.
+  const reverseFill = useCallback((which: "start" | "end", lat: number, lon: number) => {
+    reverseGeocode(lat, lon)
+      .then((label) => { if (label) (which === "start" ? setStartLabel : setEndLabel)(label); })
+      .catch(() => { /* keep the placeholder label */ });
+  }, []);
+
+  const pickStart = useCallback((wp: { lat: number; lon: number; label: string }) => {
+    const p = { lat: wp.lat, lon: wp.lon };
+    setStart(p); setStartLabel(wp.label); setSelectedRouteId(null); setGpsError(null);
+    framePoints(end ? [p, end] : [p]);
+  }, [end, framePoints]);
+
+  const pickEnd = useCallback((wp: { lat: number; lon: number; label: string }) => {
+    const p = { lat: wp.lat, lon: wp.lon };
+    setEnd(p); setEndLabel(wp.label); setSelectedRouteId(null);
+    framePoints(start ? [start, p] : [p]);
+  }, [start, framePoints]);
+
+  const clearStart = useCallback(() => { setStart(null); setStartLabel(null); setSelectedRouteId(null); }, []);
+  const clearEnd = useCallback(() => { setEnd(null); setEndLabel(null); setSelectedRouteId(null); }, []);
+
+  const swapEnds = useCallback(() => {
+    setStart(end); setEnd(start);
+    setStartLabel(endLabel); setEndLabel(startLabel);
+    setSelectedRouteId(null);
+  }, [start, end, startLabel, endLabel]);
+
   const useGps = useCallback(() => {
     if (!navigator.geolocation) { setGpsError("Geolocation not available in this browser."); return; }
     setGpsLoading(true); setGpsError(null);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setStart({ lat: pos.coords.latitude, lon: pos.coords.longitude });
-        setEnd(null); setSelectedRouteId(null); setGpsLoading(false);
-        setViewState((vs) => ({ ...vs, longitude: pos.coords.longitude, latitude: pos.coords.latitude, zoom: Math.max(vs.zoom ?? 14, 14) }));
+        const lat = pos.coords.latitude, lon = pos.coords.longitude;
+        setStart({ lat, lon }); setStartLabel("My location"); setSelectedRouteId(null); setGpsLoading(false);
+        setViewState((vs) => constrainView({ ...vs, longitude: lon, latitude: lat, zoom: Math.max(vs.zoom ?? 14, 14) }));
       },
       (err) => { setGpsLoading(false); setGpsError(`Location failed: ${err.message}`); },
       { enableHighAccuracy: true, timeout: 10000 },
@@ -386,10 +440,7 @@ function MapApp() {
   }, [segments, wayHighways]);
 
   const zoom = viewState.zoom ?? initialViewState.zoom;
-  // Phones never use the dense multi-arrow grid — one arrow per street, capped.
-  const density = isMobile
-    ? (arrowDensityForZoom(zoom) === "hidden" ? "hidden" : "single")
-    : arrowDensityForZoom(zoom);
+  const density = arrowDensityForZoom(zoom);
 
   // Padded, snapped viewport box (as a stable string key). Recomputed every frame
   // but only changes value when the view moves across a snap cell.
@@ -427,20 +478,17 @@ function MapApp() {
   const windArrows = useMemo(() => {
     if (!enrichedSegments || !windResult || !boundsKey) return [];
     const [west, south, east, north] = boundsKey.split(",").map(Number);
-    let visible = enrichedSegments.filter(
+    const visible = enrichedSegments.filter(
       (s) => s.lon >= west && s.lon <= east && s.lat >= south && s.lat <= north,
     );
-    // Phone budget: keep only the arrows nearest the screen centre.
-    if (isMobile && visible.length > MOBILE_ARROW_CAP) {
-      const cx = (west + east) / 2;
-      const cy = (south + north) / 2;
-      visible = visible
-        .map((s) => ({ s, d: (s.lon - cx) ** 2 + (s.lat - cy) ** 2 }))
-        .sort((a, b) => a.d - b.d)
-        .slice(0, MOBILE_ARROW_CAP)
-        .map((x) => x.s);
+    const arrows = buildWindArrows(visible, windResult.wind, density);
+    // Phone budget: thin the field EVENLY (every k-th arrow) so coverage stays
+    // uniform across the screen while the per-frame count stays bounded.
+    if (isMobile && arrows.length > MOBILE_ARROW_CAP) {
+      const stride = Math.ceil(arrows.length / MOBILE_ARROW_CAP);
+      return arrows.filter((_, i) => i % stride === 0);
     }
-    return buildWindArrows(visible, windResult.wind, density);
+    return arrows;
   }, [enrichedSegments, windResult, density, boundsKey, isMobile]);
 
   // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
@@ -566,13 +614,19 @@ function MapApp() {
       const [lon, lat] = info.coordinate;
       setSelectedRouteId(null);
       setGpsError(null);
-      if (!start) setStart({ lat, lon });
-      else if (!end) setEnd({ lat, lon });
-      else { setStart({ lat, lon }); setEnd(null); } // both set → begin a new pair
+      if (!start) {
+        setStart({ lat, lon }); setStartLabel("Dropped pin"); reverseFill("start", lat, lon);
+      } else if (!end) {
+        setEnd({ lat, lon }); setEndLabel("Dropped pin"); reverseFill("end", lat, lon);
+      } else {
+        // Both set → start a fresh pair from the new tap.
+        setStart({ lat, lon }); setStartLabel("Dropped pin"); reverseFill("start", lat, lon);
+        setEnd(null); setEndLabel(null);
+      }
       return;
     }
     if (!info.layer) setPinned(null);
-  }, [routing, start, end]);
+  }, [routing, start, end, reverseFill]);
 
   const routeDrawerStyle: React.CSSProperties = isMobile
     ? {
@@ -608,6 +662,9 @@ function MapApp() {
         <MapLibreMap
           reuseMaps
           mapStyle={MAP_STYLE}
+          // Hide the on-map credit line (it overlapped the wind scale on phones);
+          // full OSM / CARTO / MapLibre attribution lives in the About dialog.
+          attributionControl={false}
           onLoad={(e: { target: maplibregl.Map }) => applyDaylight(e.target)}
         />
       </DeckGL>
@@ -637,6 +694,13 @@ function MapApp() {
             onToggle={toggleRouting}
             start={start}
             end={end}
+            startLabel={startLabel}
+            endLabel={endLabel}
+            onPickStart={pickStart}
+            onPickEnd={pickEnd}
+            onClearStart={clearStart}
+            onClearEnd={clearEnd}
+            onSwap={swapEnds}
             building={routeComputing}
             gpsLoading={gpsLoading}
             gpsError={gpsError}

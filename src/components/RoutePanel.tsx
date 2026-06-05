@@ -5,6 +5,9 @@
 import { RANK_CRITERIA, type RouteOption, type RankCriterion } from "../routing/windRoute";
 import { glass, pill, pillActive, COLORS, NUM, label } from "./ui";
 import { Icon } from "./Icon";
+import LocationSearch from "./LocationSearch";
+
+interface Waypoint { lat: number; lon: number; label: string; }
 
 interface LatLon {
   lat: number;
@@ -16,6 +19,13 @@ interface Props {
   onToggle: () => void;
   start: LatLon | null;
   end: LatLon | null;
+  startLabel: string | null;
+  endLabel: string | null;
+  onPickStart: (wp: Waypoint) => void;
+  onPickEnd: (wp: Waypoint) => void;
+  onClearStart: () => void;
+  onClearEnd: () => void;
+  onSwap: () => void;
   building: boolean;
   gpsLoading: boolean;
   gpsError: string | null;
@@ -45,7 +55,9 @@ function windSuffered(avgHeadwindMs: number) {
 }
 
 export default function RoutePanel({
-  active, onToggle, start, end, building, gpsLoading, gpsError,
+  active, onToggle, start, end, startLabel, endLabel,
+  onPickStart, onPickEnd, onClearStart, onClearEnd, onSwap,
+  building, gpsLoading, gpsError,
   onUseGps, onReset, options, bestId, selectedId, onSelect, criterion, onCriterion, isMobile,
 }: Props) {
   if (!active) {
@@ -72,8 +84,8 @@ export default function RoutePanel({
 
   const criterionLabel = RANK_CRITERIA.find((c) => c.key === criterion)?.label ?? "";
   const status =
-    !start ? "Click the map to set your start (or use GPS)." :
-    !end ? "Now click your destination." :
+    !start ? "Search an address, tap the map, or use GPS to set your start." :
+    !end ? "Now choose your destination." :
     building ? "Finding the best routes…" :
     options.length === 0 ? "No route found between those points." :
     windSimilar ? `${options.length} routes — wind is similar on all (★ = ${criterionLabel}).` :
@@ -92,24 +104,47 @@ export default function RoutePanel({
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", marginBottom: 8 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
+          <LocationSearch
+            kind="start"
+            placeholder="Choose start"
+            value={startLabel}
+            onPick={onPickStart}
+            onClear={onClearStart}
+            onGps={onUseGps}
+            gpsLoading={gpsLoading}
+          />
+          <LocationSearch
+            kind="end"
+            placeholder="Choose destination"
+            value={endLabel}
+            onPick={onPickEnd}
+            onClear={onClearEnd}
+            autoFocus={!!start && !end}
+          />
+        </div>
         <button
-          onClick={onUseGps}
-          disabled={gpsLoading}
-          style={{ ...pill, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, opacity: gpsLoading ? 0.6 : 1 }}
+          onClick={onSwap}
+          disabled={!start && !end}
+          className="lift"
+          aria-label="Swap start and destination"
+          title="Swap"
+          style={{ ...pill, width: 34, height: 34, padding: 0, display: "flex", alignItems: "center", justifyContent: "center", opacity: start || end ? 1 : 0.4 }}
         >
-          <Icon name="target" size={15} color={COLORS.accent} />
-          {gpsLoading ? "Locating…" : "My location"}
-        </button>
-        <button
-          onClick={onReset}
-          style={{ ...pill, display: "flex", alignItems: "center", gap: 6 }}
-        >
-          <Icon name="reset" size={14} color={COLORS.dim} />
-          Reset
+          <Icon name="swap" size={16} color={COLORS.dim} />
         </button>
       </div>
-      {gpsError && <div style={{ fontSize: 11, color: COLORS.bad, marginBottom: 6 }}>{gpsError}</div>}
+      {gpsError && <div style={{ fontSize: 11, color: COLORS.bad, marginBottom: 8 }}>{gpsError}</div>}
+      {(start || end) && (
+        <button
+          onClick={onReset}
+          style={{ border: "none", background: "transparent", color: COLORS.dim, fontSize: 12, cursor: "pointer", padding: 0, marginBottom: 10, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5 }}
+        >
+          <Icon name="reset" size={13} color={COLORS.faint} />
+          Clear all
+        </button>
+      )}
 
       {options.length > 0 && (
         <div style={{ marginBottom: 9 }}>

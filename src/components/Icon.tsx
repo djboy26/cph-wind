@@ -13,7 +13,9 @@ export type IconName =
   | "wind"
   | "close"
   | "reset"
-  | "tap";
+  | "tap"
+  | "pin"
+  | "swap";
 
 const PATHS: Record<IconName, ReactNode> = {
   // Navigation arrow inside a ring.
@@ -65,6 +67,20 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1" />
       <path d="M3.5 4.5V9.5H8.5" />
+    </>
+  ),
+  // Map pin.
+  pin: (
+    <>
+      <path d="M12 21s6.5-5.6 6.5-10.5a6.5 6.5 0 0 0-13 0C5.5 15.4 12 21 12 21z" />
+      <circle cx="12" cy="10.5" r="2.3" />
+    </>
+  ),
+  // Vertical swap (left arrow down, right arrow up).
+  swap: (
+    <>
+      <path d="M8 4.5v15M8 19.5l-2.5-2.6M8 19.5l2.5-2.6" />
+      <path d="M16 19.5v-15M16 4.5l-2.5 2.6M16 4.5l2.5 2.6" />
     </>
   ),
   // Tap / pointer hint.
