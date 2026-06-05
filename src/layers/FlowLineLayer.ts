@@ -17,30 +17,47 @@ import {
 import { windBandColor } from '../cyclist/windCategory';
 import type { RawSegment } from './buildWindArrows';
 
+const DEG = Math.PI / 180;
 const ARROWS_PER_STREET = 3;
-const STREAM_MIN_M = 16;
-const STREAM_MAX_M = 30;
-// Stream traversals per second, and the fraction of the stream over which an arrow
-// fades in/out at the ends (so the wrap is invisible).
-const RATE = 0.3;
+// How far along the street the arrows are spread (capped), and the max lateral
+// excursion off the centerline. Together they confine every arrow to the road
+// while it drifts in the TRUE wind direction.
+const SPREAD_MAX_M = 40;
+const CROSS_MARGIN_M = 3;
+const RATE = 0.45;
 const FADE = 0.18;
+
+// Max drift (m) along flowDeg before the particle would leave its on-road cell:
+// lots of travel when the wind runs along the street, very little across it. This
+// is what keeps arrows coherent (they move the way they point) AND on the road.
+function boundedTravel(flowDeg: number, bearingDeg: number, alongCellM: number): number {
+  const rel = (flowDeg - bearingDeg) * DEG;
+  const along = Math.abs(Math.cos(rel));
+  const cross = Math.abs(Math.sin(rel));
+  const byAlong = alongCellM / Math.max(along, 1e-3);
+  const byCross = (2 * CROSS_MARGIN_M) / Math.max(cross, 1e-3);
+  return Math.max(0, Math.min(byAlong, byCross, alongCellM * 1.5));
+}
 
 export interface FlowLine {
   lon: number;
   lat: number;
-  /** Compass direction the wind flows TOWARD (arrow points + streams this way). */
+  /** Compass direction the wind flows TOWARD — the arrow points AND drifts this way. */
   flowDeg: number;
+  /** Street axis (deg CW from N) — used to place arrows along the centerline. */
+  bearingDeg: number;
+  /** Fixed offset along the street (m) for this arrow, spreading them down the road. */
+  baseAlongM: number;
+  /** Max drift (m) in flowDeg — bounded by the road so the arrow stays on it. */
+  travelLenM: number;
   color: [number, number, number];
   /** Arrow size in metres (bigger = stronger wind). */
   sizeM: number;
   /** Stagger position along the conveyor, 0..1. */
   phase: number;
-  /** Half the stream length, metres. */
-  streamHalfLen: number;
   // --- carried for the tooltip ---
   speedMs: number;
   gustMs?: number;
-  bearingDeg: number;
   canyonH: number;
   canyonW: number;
   leftHeightM: number;
@@ -73,7 +90,7 @@ function sizeForSpeed(speedMs: number): number {
   return Math.max(3, Math.min(9.5, 2.6 + speedMs * 0.95));
 }
 
-/** A few wind-direction arrows per street, staggered along a downwind conveyor. */
+/** Wind-direction arrows spread along each street; each drifts (bounded) in flowDeg. */
 export function buildFlowField(segments: RawSegment[], wind: Wind): FlowLine[] {
   const out: FlowLine[] = [];
   for (const raw of segments) {
@@ -81,19 +98,24 @@ export function buildFlowField(segments: RawSegment[], wind: Wind): FlowLine[] {
     const cw = computeSegmentCenterWind(seg, wind); // { speedMs, flowDeg, gustMs }
     const color = windBandColor(cw.speedMs);
     const sizeM = sizeForSpeed(cw.speedMs);
-    const streamHalfLen = Math.max(STREAM_MIN_M, Math.min(STREAM_MAX_M, seg.segmentLengthM)) / 2;
+    // Spread the arrows along the street centerline, each within its own slot.
+    const spread = Math.min(seg.segmentLengthM, SPREAD_MAX_M);
+    const alongCell = spread / ARROWS_PER_STREET;
+    const travelLenM = boundedTravel(cw.flowDeg, seg.bearingDeg, alongCell);
     for (let k = 0; k < ARROWS_PER_STREET; k++) {
+      const baseAlongM = ((k + 0.5) / ARROWS_PER_STREET - 0.5) * spread;
       out.push({
         lon: seg.lon,
         lat: seg.lat,
         flowDeg: cw.flowDeg,
+        bearingDeg: seg.bearingDeg,
+        baseAlongM,
+        travelLenM,
         color,
         sizeM,
         phase: k / ARROWS_PER_STREET,
-        streamHalfLen,
         speedMs: cw.speedMs,
         gustMs: cw.gustMs,
-        bearingDeg: seg.bearingDeg,
         canyonH: seg.canyonH,
         canyonW: seg.canyonW,
         leftHeightM: seg.leftHeightM,
@@ -112,8 +134,12 @@ function fracOf(d: FlowLine, time: number): number {
 
 function arrowPosition(d: FlowLine, time: number): [number, number] {
   const frac = fracOf(d, time);
-  const along = (frac - 0.5) * 2 * d.streamHalfLen; // upwind (−) → downwind (+)
-  const p = offsetAlongBearing({ lon: d.lon, lat: d.lat }, d.flowDeg, along);
+  // Anchor on the street centerline, then drift in the TRUE wind direction (flowDeg)
+  // — the arrow moves the way it points. travelLenM is bounded by the road, so the
+  // cross-street excursion can't leave the carriageway.
+  const anchor = offsetAlongBearing({ lon: d.lon, lat: d.lat }, d.bearingDeg, d.baseAlongM);
+  const drift = (frac - 0.5) * d.travelLenM;
+  const p = offsetAlongBearing(anchor, d.flowDeg, drift);
   return [p.lon, p.lat];
 }
 

@@ -11,7 +11,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { FeatureCollection } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
 import { reverseGeocode } from "./api/geocode";
-import { arrowDensityForZoom, roadWidthForHighway, type RawSegment } from "./layers/buildWindArrows";
+import { arrowDensityForZoom, type RawSegment } from "./layers/buildWindArrows";
+import type { GeometrySource } from "./math";
 import { buildFlowField, createFlowLineLayer, type FlowLine } from "./layers/FlowLineLayer";
 import { rankRoutes, type RouteOption, type RankCriterion } from "./routing/windRoute";
 import type { OutMsg } from "./routing/routingWorker";
@@ -210,6 +211,38 @@ const MAX_SPAN_DEG = 0.12;
 const MAX_FLOW_STREETS_MOBILE = 650;
 const MAX_FLOW_STREETS_DESKTOP = 1700;
 
+// --- Segment tiles (built by scripts/tile-segments.mjs; loaded per viewport) ---
+// Streets are split into a spatial grid so the phone downloads only what's in view
+// (~tens of KB) instead of the whole 21.7 MB city. Each segment is a lean tuple;
+// widthM / canyon / lanes are recomputed here.
+interface TileManifest { tileDeg: number; minLon: number; minLat: number; tiles: Set<string>; }
+const GEOM_SRC = ["measured", "partial", "fallback"] as const;
+type SegTuple = [number, number, number, number, number, number, number, number, number, string | number | null];
+
+function decodeSeg(t: SegTuple): RawSegment {
+  const [lon, lat, bearingDeg, segLen, leftDist, rightDist, leftH, rightH, geomSrc, wayId] = t;
+  const widthM = leftDist + rightDist;
+  return {
+    wayId: wayId ?? undefined,
+    lon, lat, bearingDeg, segmentLengthM: segLen,
+    widthM, leftDistM: leftDist, rightDistM: rightDist,
+    leftHeightM: leftH, rightHeightM: rightH,
+    canyonH: (leftH + rightH) / 2, canyonW: widthM,
+    laneOffsetsM: [0, 0, 0, 0, 0],
+    geometrySource: (GEOM_SRC[geomSrc] ?? "fallback") as GeometrySource,
+  };
+}
+
+function tileKeysForBounds(m: TileManifest, west: number, south: number, east: number, north: number): string[] {
+  const c0 = Math.floor((west - m.minLon) / m.tileDeg);
+  const c1 = Math.floor((east - m.minLon) / m.tileDeg);
+  const r0 = Math.floor((south - m.minLat) / m.tileDeg);
+  const r1 = Math.floor((north - m.minLat) / m.tileDeg);
+  const keys: string[] = [];
+  for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) keys.push(`${c}_${r}`);
+  return keys;
+}
+
 function MapApp() {
   const isMobile = useIsMobile();
   // 30 fps on phones (now that 3D is off there's headroom for a livelier field),
@@ -232,7 +265,12 @@ function MapApp() {
   );
 
   const [roads, setRoads] = useState<FeatureCollection | null>(null);
-  const [segments, setSegments] = useState<RawSegment[] | null>(null);
+  // Viewport-tiled segments: a manifest of which tiles exist, a cache of decoded
+  // tiles, an in-flight guard, and a version counter that bumps as tiles arrive.
+  const [tileManifest, setTileManifest] = useState<TileManifest | null>(null);
+  const tileCacheRef = useRef<Map<string, RawSegment[]>>(new Map());
+  const tileInflightRef = useRef<Set<string>>(new Set());
+  const [tileVersion, setTileVersion] = useState(0);
   const [buildings, setBuildings] = useState<BuildingRow[] | null>(null);
   const buildingsReq = useRef(false);
   const [dataError, setDataError] = useState<Error | null>(null);
@@ -382,25 +420,43 @@ function MapApp() {
     );
   }, []);
 
+  // The wind critical path is now just the tiny tile manifest; the actual street
+  // tiles stream in per viewport (see the tile-loading effect below).
   useEffect(() => {
-    Promise.all([
-      fetch("/data/cph-roads.json").then((r) => {
-        if (!r.ok) throw new Error(`Roads ${r.status}`);
-        return r.json();
-      }),
-      fetch("/data/cph-segments.json").then((r) => {
-        if (!r.ok) throw new Error(`Segments ${r.status}`);
-        return r.json();
-      }),
-    ])
-      .then(([r, s]) => { setRoads(r); setSegments(s); })
-      .catch(setDataError);
+    let cancelled = false;
+    fetch("/data/segtiles/index.json")
+      .then((r) => { if (!r.ok) throw new Error(`Tile index ${r.status}`); return r.json(); })
+      .then((m) => {
+        if (!cancelled) setTileManifest({ tileDeg: m.tileDeg, minLon: m.minLon, minLat: m.minLat, tiles: new Set<string>(m.tiles) });
+      })
+      .catch((e) => { if (!cancelled) setDataError(e); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Roads are needed only for street-name tooltips + route planning, both
+  // user-initiated. Load them just after first paint (idle) so they never compete
+  // with the segments download on the critical path.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch("/data/cph-roads.json")
+        .then((r) => { if (!r.ok) throw new Error(`Roads ${r.status}`); return r.json(); })
+        .then((r) => { if (!cancelled) setRoads(r); })
+        .catch((e) => { if (!cancelled) console.warn("Roads failed to load:", e); });
+    };
+    const ric = (window as any).requestIdleCallback;
+    const id = ric ? ric(load, { timeout: 3000 }) : window.setTimeout(load, 1200);
+    return () => {
+      cancelled = true;
+      const cic = (window as any).cancelIdleCallback;
+      if (ric && cic) cic(id); else window.clearTimeout(id as number);
+    };
   }, []);
 
   // Lazily pull the ~42 MB 3D-buildings file the first time the rider zooms in far
   // enough to see extrusions — never on first paint, so the map opens fast. Phones
   // skip 3D entirely (the fetch + per-frame extrusion is the main mobile cost).
-  const wantBuildings = !isMobile && !!roads && (viewState.zoom ?? 0) >= BUILDINGS_MIN_ZOOM;
+  const wantBuildings = !isMobile && (viewState.zoom ?? 0) >= BUILDINGS_MIN_ZOOM;
   useEffect(() => {
     if (!wantBuildings || buildingsReq.current) return;
     buildingsReq.current = true;
@@ -419,26 +475,6 @@ function MapApp() {
     }
     return m;
   }, [roads]);
-
-  // Carriageway width per way, from the OSM highway class — used to confine arrows
-  // to the road (the segments' stored width is the building-to-building canyon gap).
-  const wayHighways = useMemo(() => {
-    if (!roads) return new Map<string, string>();
-    const m = new Map<string, string>();
-    for (const f of roads.features) {
-      const p: any = f.properties || {};
-      if (p.id != null && p.highway) m.set(String(p.id), p.highway);
-    }
-    return m;
-  }, [roads]);
-
-  const enrichedSegments = useMemo(() => {
-    if (!segments) return null;
-    return segments.map((s) => ({
-      ...s,
-      roadWidthM: roadWidthForHighway(wayHighways.get(String(s.wayId)), s.widthM ?? s.canyonW),
-    }));
-  }, [segments, wayHighways]);
 
   const zoom = viewState.zoom ?? initialViewState.zoom;
   const density = arrowDensityForZoom(zoom);
@@ -476,12 +512,38 @@ function MapApp() {
     return `${west.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${north.toFixed(4)}`;
   }, [density, windowSize.width, windowSize.height, viewState.longitude, viewState.latitude, viewState.zoom, viewState.pitch, viewState.bearing]);
 
-  const flowLines = useMemo<FlowLine[]>(() => {
-    if (!enrichedSegments || !windResult || !boundsKey || density === "hidden") return [];
+  // Fetch the segment tiles covering the current viewport (skip empty/loaded/in-flight
+  // ones), decode them, and bump tileVersion so the wind field rebuilds as they land.
+  useEffect(() => {
+    if (!tileManifest || !boundsKey) return;
     const [west, south, east, north] = boundsKey.split(",").map(Number);
-    let visible = enrichedSegments.filter(
-      (s) => s.lon >= west && s.lon <= east && s.lat >= south && s.lat <= north,
-    );
+    for (const key of tileKeysForBounds(tileManifest, west, south, east, north)) {
+      if (!tileManifest.tiles.has(key)) continue;
+      if (tileCacheRef.current.has(key) || tileInflightRef.current.has(key)) continue;
+      tileInflightRef.current.add(key);
+      fetch(`/data/segtiles/${key}.json`)
+        .then((r) => { if (!r.ok) throw new Error(`Tile ${key} ${r.status}`); return r.json(); })
+        .then((arr: SegTuple[]) => {
+          tileCacheRef.current.set(key, arr.map(decodeSeg));
+          tileInflightRef.current.delete(key);
+          setTileVersion((v) => v + 1);
+        })
+        .catch((e) => { tileInflightRef.current.delete(key); console.warn("Tile load failed:", e); });
+    }
+  }, [tileManifest, boundsKey]);
+
+  const flowLines = useMemo<FlowLine[]>(() => {
+    if (!tileManifest || !windResult || !boundsKey || density === "hidden") return [];
+    const [west, south, east, north] = boundsKey.split(",").map(Number);
+    // Gather streets from the loaded tiles intersecting the view, clipped to bounds.
+    let visible: RawSegment[] = [];
+    for (const key of tileKeysForBounds(tileManifest, west, south, east, north)) {
+      const segs = tileCacheRef.current.get(key);
+      if (!segs) continue;
+      for (const s of segs) {
+        if (s.lon >= west && s.lon <= east && s.lat >= south && s.lat <= north) visible.push(s);
+      }
+    }
     // Thin streets evenly across the view to bound the per-frame arrow count.
     const cap = isMobile ? MAX_FLOW_STREETS_MOBILE : MAX_FLOW_STREETS_DESKTOP;
     if (visible.length > cap) {
@@ -489,7 +551,8 @@ function MapApp() {
       visible = visible.filter((_, i) => i % stride === 0);
     }
     return buildFlowField(visible, windResult.wind);
-  }, [enrichedSegments, windResult, density, boundsKey, isMobile]);
+    // tileVersion in deps so the field rebuilds as tiles arrive.
+  }, [tileManifest, windResult, density, boundsKey, isMobile, tileVersion]);
 
   // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
   // footprints would choke the GPU. boundsKey already snaps to a coarse grid, so
@@ -511,7 +574,7 @@ function MapApp() {
   // they are NOT rebuilt on every animation frame (only when the visible set
   // changes) — extruding ~thousands of footprints 60×/s would crush a phone.
   const buildingLayers = useMemo(() => {
-    if (!roads || !visibleBuildings || visibleBuildings.length === 0) return [];
+    if (!visibleBuildings || visibleBuildings.length === 0) return [];
     return [
       new PolygonLayer<BuildingRow>({
         id: "buildings",
@@ -526,7 +589,7 @@ function MapApp() {
         pickable: false,
       }),
     ];
-  }, [roads, visibleBuildings]);
+  }, [visibleBuildings]);
 
   // Routes + endpoints draw on TOP of the wind arrows. Also kept off the per-frame
   // path so the route polylines aren't rebuilt while arrows animate.
@@ -606,7 +669,9 @@ function MapApp() {
     [buildingLayers, flowLinesLayer, routeLayers],
   );
 
-  const stillLoading = !roads || !segments;
+  // "Loaded" = the tile manifest is in and the first viewport tile has decoded
+  // (wind is on screen). Roads + further tiles stream in afterwards.
+  const stillLoading = !tileManifest || tileVersion === 0;
   const showWindError = windError && !windResult;
   const showDataError = dataError && stillLoading;
   const activeTip = pinned ?? hover;
@@ -760,5 +825,6 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+
 
 

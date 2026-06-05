@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# On-demand audit report + its generator (regenerated when asked; never committed)
+/reports/
+/scripts/build-audit-deck.py
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
