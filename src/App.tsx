@@ -11,8 +11,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { FeatureCollection } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
 import { reverseGeocode } from "./api/geocode";
-import { arrowDensityForZoom, buildWindArrows, roadWidthForHighway, type RawSegment } from "./layers/buildWindArrows";
-import { createWindFlowLayer, type WindArrowInstance } from "./layers/WindFlowLayer";
+import { arrowDensityForZoom, roadWidthForHighway, type RawSegment } from "./layers/buildWindArrows";
+import { buildFlowField, createFlowLineLayer, type FlowLine } from "./layers/FlowLineLayer";
 import { rankRoutes, type RouteOption, type RankCriterion } from "./routing/windRoute";
 import type { OutMsg } from "./routing/routingWorker";
 import TopBar from "./components/TopBar";
@@ -40,7 +40,7 @@ type BuildingRow = [number, [number, number][]];
 interface HoverState {
   x: number;
   y: number;
-  arrow: WindArrowInstance;
+  arrow: FlowLine;
 }
 
 const COPENHAGEN = { lat: 55.6761, lon: 12.5683 };
@@ -205,9 +205,10 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 const SNAP_DEG = 0.004;
 const BOUNDS_PAD = 0.25;
 const MAX_SPAN_DEG = 0.12;
-// Phones get a generous arrow budget, thinned EVENLY across the viewport (not a
-// central cluster) so the wind field reads well while per-frame work stays bounded.
-const MOBILE_ARROW_CAP = 800;
+// Each street gets a few arrows whose positions are recomputed per frame on the CPU,
+// so cap how many streets we draw (thinned evenly across the view) to stay smooth.
+const MAX_FLOW_STREETS_MOBILE = 650;
+const MAX_FLOW_STREETS_DESKTOP = 1700;
 
 function MapApp() {
   const isMobile = useIsMobile();
@@ -475,20 +476,19 @@ function MapApp() {
     return `${west.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${north.toFixed(4)}`;
   }, [density, windowSize.width, windowSize.height, viewState.longitude, viewState.latitude, viewState.zoom, viewState.pitch, viewState.bearing]);
 
-  const windArrows = useMemo(() => {
-    if (!enrichedSegments || !windResult || !boundsKey) return [];
+  const flowLines = useMemo<FlowLine[]>(() => {
+    if (!enrichedSegments || !windResult || !boundsKey || density === "hidden") return [];
     const [west, south, east, north] = boundsKey.split(",").map(Number);
-    const visible = enrichedSegments.filter(
+    let visible = enrichedSegments.filter(
       (s) => s.lon >= west && s.lon <= east && s.lat >= south && s.lat <= north,
     );
-    const arrows = buildWindArrows(visible, windResult.wind, density);
-    // Phone budget: thin the field EVENLY (every k-th arrow) so coverage stays
-    // uniform across the screen while the per-frame count stays bounded.
-    if (isMobile && arrows.length > MOBILE_ARROW_CAP) {
-      const stride = Math.ceil(arrows.length / MOBILE_ARROW_CAP);
-      return arrows.filter((_, i) => i % stride === 0);
+    // Thin streets evenly across the view to bound the per-frame arrow count.
+    const cap = isMobile ? MAX_FLOW_STREETS_MOBILE : MAX_FLOW_STREETS_DESKTOP;
+    if (visible.length > cap) {
+      const stride = Math.ceil(visible.length / cap);
+      visible = visible.filter((_, i) => i % stride === 0);
     }
-    return arrows;
+    return buildFlowField(visible, windResult.wind);
   }, [enrichedSegments, windResult, density, boundsKey, isMobile]);
 
   // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
@@ -581,14 +581,16 @@ function MapApp() {
     return result;
   }, [routing, rankedRoutes, selectedRoute, bestId, start, end]);
 
-  // Only the wind layer is rebuilt per frame (flowPhase). The reused building/route
-  // layer instances above are passed through unchanged, so deck.gl skips them.
-  const windLayer = useMemo(() => {
-    if (windArrows.length === 0) return null;
-    return createWindFlowLayer({
-      data: windArrows,
-      flowPhase,
-      // While planning a route, clicks set waypoints instead of pinning arrows.
+  // Animated dashed flow streaks (oriented in the wind direction). Rebuilt per frame
+  // (flowPhase), but that only updates a single GPU time uniform — the path/color
+  // attributes are unchanged, so it's cheap. Also the pick target for the tooltip.
+  const flowLinesLayer = useMemo(() => {
+    if (flowLines.length === 0) return null;
+    return createFlowLineLayer({
+      data: flowLines,
+      time: flowPhase,
+      isMobile,
+      // While planning a route, clicks set waypoints instead of pinning a street.
       onHover: isMobile || routing ? undefined : (info) => {
         setHover(info.object ? { x: info.x, y: info.y, arrow: info.object } : null);
       },
@@ -597,11 +599,11 @@ function MapApp() {
         return true;
       },
     });
-  }, [windArrows, flowPhase, isMobile, routing]);
+  }, [flowLines, flowPhase, isMobile, routing]);
 
   const layers = useMemo(
-    () => [...buildingLayers, ...(windLayer ? [windLayer] : []), ...routeLayers],
-    [buildingLayers, windLayer, routeLayers],
+    () => [...buildingLayers, ...(flowLinesLayer ? [flowLinesLayer] : []), ...routeLayers],
+    [buildingLayers, flowLinesLayer, routeLayers],
   );
 
   const stillLoading = !roads || !segments;
@@ -739,8 +741,8 @@ function MapApp() {
           leftHeightM={activeTip.arrow.leftHeightM}
           rightHeightM={activeTip.arrow.rightHeightM}
           geometrySource={activeTip.arrow.geometrySource}
-          laneIndex={activeTip.arrow.laneIndex}
-          laneCount={activeTip.arrow.laneCount}
+          laneIndex={0}
+          laneCount={1}
           variant={isMobile ? "sheet" : "cursor"}
           onClose={() => setPinned(null)}
         />
@@ -758,3 +760,5 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+
+

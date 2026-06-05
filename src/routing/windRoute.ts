@@ -15,7 +15,7 @@ export interface CyclingParams {
   /** Effective-speed clamps, m/s. */
   minSpeedMs: number;
   maxSpeedMs: number;
-  /** Headwind (m/s) above which a stretch counts as "into the wind". */
+  /** Headwind (m/s, street-level) above which a stretch counts as "into the wind". */
   headwindThresholdMs: number;
 }
 
@@ -24,7 +24,10 @@ export const DEFAULT_PARAMS: CyclingParams = {
   windSensitivity: 0.4,
   minSpeedMs: 1.2,
   maxSpeedMs: 8.5,
-  headwindThresholdMs: 2,
+  // A gentle but noticeable headwind. At 2 m/s this almost never triggered on a
+  // typical day (street-level wind ≈ 0.6 × ~5 m/s ≈ 3 m/s means you'd have to ride
+  // within ~45° of dead into the wind), so "into wind %" read ~0 on every route.
+  headwindThresholdMs: 1.0,
 };
 
 /** Signed headwind for travelling along an edge (+ = headwind, − = tailwind), m/s. */
