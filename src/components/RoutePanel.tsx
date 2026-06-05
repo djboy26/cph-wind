@@ -3,7 +3,8 @@
 // Presentational: all state lives in App.
 
 import { RANK_CRITERIA, type RouteOption, type RankCriterion } from "../routing/windRoute";
-import { glass, pill, pillActive, COLORS } from "./ui";
+import { glass, pill, pillActive, COLORS, NUM, label } from "./ui";
+import { Icon } from "./Icon";
 
 interface LatLon {
   lat: number;
@@ -49,8 +50,13 @@ export default function RoutePanel({
 }: Props) {
   if (!active) {
     return (
-      <button onClick={onToggle} style={{ ...pillActive, padding: "9px 15px", fontWeight: 700, fontSize: 14, ...glass, color: COLORS.text }}>
-        🧭 Plan a route
+      <button
+        onClick={onToggle}
+        className="lift"
+        style={{ ...glass, display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", fontWeight: 600, fontSize: 14, color: COLORS.text, cursor: "pointer" }}
+      >
+        <Icon name="route" size={17} color={COLORS.accent} />
+        Plan a route
       </button>
     );
   }
@@ -68,31 +74,46 @@ export default function RoutePanel({
   const status =
     !start ? "Click the map to set your start (or use GPS)." :
     !end ? "Now click your destination." :
-    building ? "Preparing road network…" :
+    building ? "Finding the best routes…" :
     options.length === 0 ? "No route found between those points." :
     windSimilar ? `${options.length} routes — wind is similar on all (★ = ${criterionLabel}).` :
     `${options.length} routes ranked by ${criterionLabel} (★ = best).`;
 
   return (
     <div style={{ ...glass, padding: "13px 15px", width: isMobile ? "auto" : 304, maxHeight: isMobile ? "46vh" : "72vh", overflowY: "auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: -0.2 }}>Plan a route</span>
-        <button onClick={onToggle} style={{ ...pill, padding: "2px 9px", fontSize: 16, lineHeight: 1.1 }} aria-label="Close">×</button>
+        <button
+          onClick={onToggle}
+          aria-label="Close"
+          style={{ ...pill, display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, padding: 0, borderRadius: "50%" }}
+        >
+          <Icon name="close" size={15} color={COLORS.dim} />
+        </button>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 9 }}>
-        <button onClick={onUseGps} disabled={gpsLoading} style={{ ...pill, flex: 1, opacity: gpsLoading ? 0.6 : 1 }}>
-          {gpsLoading ? "Locating…" : "📍 Use my location"}
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <button
+          onClick={onUseGps}
+          disabled={gpsLoading}
+          style={{ ...pill, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, opacity: gpsLoading ? 0.6 : 1 }}
+        >
+          <Icon name="target" size={15} color={COLORS.accent} />
+          {gpsLoading ? "Locating…" : "My location"}
         </button>
-        <button onClick={onReset} style={pill}>Reset</button>
+        <button
+          onClick={onReset}
+          style={{ ...pill, display: "flex", alignItems: "center", gap: 6 }}
+        >
+          <Icon name="reset" size={14} color={COLORS.dim} />
+          Reset
+        </button>
       </div>
       {gpsError && <div style={{ fontSize: 11, color: COLORS.bad, marginBottom: 6 }}>{gpsError}</div>}
 
       {options.length > 0 && (
         <div style={{ marginBottom: 9 }}>
-          <div style={{ fontSize: 9.5, color: COLORS.faint, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.8, fontWeight: 600 }}>
-            Rank by
-          </div>
+          <div style={{ ...label, marginBottom: 6 }}>Rank by</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
             {RANK_CRITERIA.map((c) => (
               <button
@@ -135,10 +156,10 @@ export default function RoutePanel({
                   {o.id === bestId && <span style={{ color: COLORS.good, marginLeft: 6, fontSize: 11 }}>{criterionLabel}</span>}
                   {o.id === shortestId && o.id !== bestId && <span style={{ color: COLORS.faint, marginLeft: 6, fontSize: 11 }}>Shortest</span>}
                 </span>
-                <span style={{ fontSize: 10.5, color: COLORS.faint }}>{fmtKm(o.metrics.distanceM)}</span>
+                <span style={{ fontSize: 10.5, color: COLORS.faint, ...NUM }}>{fmtKm(o.metrics.distanceM)}</span>
               </div>
               {/* Three criteria: time · wind suffered · % into wind */}
-              <div style={{ fontSize: 11, color: COLORS.dim, marginTop: 5, display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8 }}>
+              <div style={{ fontSize: 11, color: COLORS.dim, marginTop: 5, display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, ...NUM }}>
                 <span><span style={{ color: COLORS.faint }}>time </span>{fmtMin(o.metrics.timeS)}</span>
                 <span><span style={{ color: COLORS.faint }}>wind </span><span style={{ color: wind.color, fontWeight: 600 }}>{wind.text}</span></span>
                 <span><span style={{ color: COLORS.faint }}>into wind </span>{Math.round(o.metrics.headwindExposure * 100)}%</span>

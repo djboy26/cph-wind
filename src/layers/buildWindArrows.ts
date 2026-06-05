@@ -71,6 +71,13 @@ const MAX_ARROW_M = 3.5;
 const SPEED_REF = 4;
 const MIN_SPEED_FACTOR = 0.25;
 const MAX_SPEED_FACTOR = 2.5;
+// Gust amplitude cap (keeps the drift-rate warp strictly increasing).
+const MAX_GUST_BOOST = 0.9;
+// Along-street wavelength of a gust front (m): nearby arrows share a phase so a
+// gust visibly sweeps down the road rather than every arrow pulsing together.
+const GUST_WAVELENGTH_M = 45;
+// Golden-ratio increment so consecutive segments gust out of sync.
+const GUST_PHASE_STEP = 0.6180339887498949;
 
 function clamp(x: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, x));
@@ -120,6 +127,12 @@ export function buildWindArrows(
     const lane = computeSegmentCenterWind(seg, wind);
     const [cr, cg, cb] = windBandColor(lane.speedMs);
     const speedFactor = clamp(lane.speedMs / SPEED_REF, MIN_SPEED_FACTOR, MAX_SPEED_FACTOR);
+    // Gust amplitude (gust/mean − 1) drives the surge animation; 0 ⇒ steady flow.
+    const gustBoost =
+      lane.gustMs && lane.speedMs > 0.3
+        ? clamp(lane.gustMs / lane.speedMs - 1, 0, MAX_GUST_BOOST)
+        : 0;
+    const segGustPhase = (i * GUST_PHASE_STEP) % 1;
     const arrowSizeM = clamp(roadW * ARROW_WIDTH_FRACTION, MIN_ARROW_M, MAX_ARROW_M);
     const crossMarginM = roadW * CROSS_MARGIN_FRACTION;
 
@@ -147,6 +160,10 @@ export function buildWindArrows(
           speedFactor,
           arrowSizeM,
           speedMs: lane.speedMs,
+          gustMs: lane.gustMs,
+          gustBoost,
+          // Offset the gust phase along the street so a gust front sweeps the road.
+          gustSeed: segGustPhase + baseAlongM / GUST_WAVELENGTH_M,
           color: [cr, cg, cb],
           laneIndex: li,
           laneCount: lanes.length,

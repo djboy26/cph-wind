@@ -30,6 +30,10 @@ export interface RoutingGraph {
   /** adj[nodeIndex] = outgoing directed edges. */
   adj: Edge[][];
   edgeCount: number;
+  /** Connected-component id per node (every edge is bidirectional, so this is well defined). */
+  component: Int32Array;
+  /** Id of the largest component — the routable backbone (~98% of nodes). */
+  mainComponent: number;
 }
 
 function metersBetween(a: LonLat, b: LonLat): number {
@@ -89,12 +93,46 @@ export function buildGraph(roads: FeatureCollection): RoutingGraph {
 
   while (adj.length < lons.length) adj.push([]);
 
+  // Label connected components. The network is one giant component (~98% of nodes)
+  // plus ~130 tiny detached islands (parking aisles, service stubs, severed
+  // cycleways). Tracking them lets us snap route clicks to the routable backbone.
+  const n = lons.length;
+  const component = new Int32Array(n).fill(-1);
+  let nComp = 0;
+  let mainComponent = 0;
+  let mainSize = 0;
+  const stack: number[] = [];
+  for (let s = 0; s < n; s++) {
+    if (component[s] !== -1) continue;
+    let size = 0;
+    component[s] = nComp;
+    stack.length = 0;
+    stack.push(s);
+    while (stack.length > 0) {
+      const u = stack.pop()!;
+      size++;
+      for (const e of adj[u]) {
+        if (component[e.to] === -1) {
+          component[e.to] = nComp;
+          stack.push(e.to);
+        }
+      }
+    }
+    if (size > mainSize) {
+      mainSize = size;
+      mainComponent = nComp;
+    }
+    nComp++;
+  }
+
   return {
     nodeLon: Float64Array.from(lons),
     nodeLat: Float64Array.from(lats),
-    nodeCount: lons.length,
+    nodeCount: n,
     adj,
     edgeCount,
+    component,
+    mainComponent,
   };
 }
 
@@ -114,6 +152,30 @@ export function nearestNode(g: RoutingGraph, lon: number, lat: number): number {
     }
   }
   return best;
+}
+
+/**
+ * Nearest node on the routable backbone (the largest connected component).
+ * A click can land closest to a detached island (a severed cycleway, a parking
+ * aisle); snapping such clicks to the main network guarantees that any start and
+ * goal are mutually reachable, so we never falsely report "no route". The few
+ * metres of snap are imperceptible next to typical click precision.
+ */
+export function nearestRoutableNode(g: RoutingGraph, lon: number, lat: number): number {
+  let best = -1;
+  let bestD = Infinity;
+  const cosLat = Math.cos(lat * DEG);
+  for (let i = 0; i < g.nodeCount; i++) {
+    if (g.component[i] !== g.mainComponent) continue;
+    const dx = (g.nodeLon[i] - lon) * cosLat;
+    const dy = g.nodeLat[i] - lat;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best >= 0 ? best : nearestNode(g, lon, lat);
 }
 
 /** Straight-line distance (m) between two nodes — used as the A* heuristic. */

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Full-bleed background (safe for maskable cropping) in the "Copenhagen Morning" land tone -->
+  <rect width="512" height="512" rx="112" fill="#f2ede2"/>
+  <!-- Soft harbour-teal glow -->
+  <circle cx="256" cy="256" r="150" fill="#9ed3d8" opacity="0.28"/>
+  <!-- Wind streaks -->
+  <g stroke="#3d4856" stroke-width="20" stroke-linecap="round" opacity="0.45">
+    <line x1="120" y1="196" x2="236" y2="196"/>
+    <line x1="120" y1="316" x2="208" y2="316"/>
+  </g>
+  <!-- Bold wind arrow, brand red -->
+  <path d="M120 256 L300 256 L300 206 L404 256 L300 306 L300 256 Z"
+        fill="#e0533d" stroke="#e0533d" stroke-width="16" stroke-linejoin="round"/>
+</svg>

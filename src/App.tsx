@@ -12,8 +12,8 @@ import type { FeatureCollection } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
 import { arrowDensityForZoom, buildWindArrows, roadWidthForHighway, type RawSegment } from "./layers/buildWindArrows";
 import { createWindFlowLayer, type WindArrowInstance } from "./layers/WindFlowLayer";
-import { buildGraph, nearestNode } from "./routing/graph";
-import { planRoutes, rankRoutes, type RouteOption, type RankCriterion } from "./routing/windRoute";
+import { rankRoutes, type RouteOption, type RankCriterion } from "./routing/windRoute";
+import type { OutMsg } from "./routing/routingWorker";
 import TopBar from "./components/TopBar";
 import Legend from "./components/Legend";
 import SegmentTooltip from "./components/SegmentTooltip";
@@ -44,23 +44,26 @@ interface HoverState {
 
 const COPENHAGEN = { lat: 55.6761, lon: 12.5683 };
 // "Daylight" — a clean light basemap, then recoloured at runtime (applyDaylight)
-// into a warm, Apple-Maps-daytime palette.
+// into the warm "Copenhagen Morning" palette (see THEME).
 const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 const MOBILE_BREAKPOINT = 768;
 
-// Daylight palette — warm paper land, soft sky water, sage parks, ivory buildings.
+// "Copenhagen Morning" palette — warm linen land, harbour-tinted teal water,
+// fresh parks, warm-bone buildings. A daylight feel of its own, not an Apple clone:
+// the water leans aqua-teal (the harbour) rather than sky-blue, parks are livelier,
+// and labels sit on a slightly deeper ink for crisper reading.
 const THEME = {
-  land: "#f3efe7",
-  water: "#a9d4e5",
-  park: "#cadbb7",
+  land: "#f2ede2",
+  water: "#9ed3d8",
+  park: "#c6dca8",
   road: "#ffffff",
-  roadCasing: "#e7dfd0",
-  building: "#ece6db",
-  boundary: "#d9cfbe",
-  ink: "#46505f",
-  halo: "#f7f3ec",
+  roadCasing: "#e8dfcc",
+  building: "#ebe4d4",
+  boundary: "#d8ccb6",
+  ink: "#3d4856",
+  halo: "#f7f2e9",
 };
-const BUILDING_RGB: [number, number, number] = [236, 230, 219]; // matches THEME.building
+const BUILDING_RGB: [number, number, number] = [235, 228, 212]; // matches THEME.building
 
 // Recolour the light basemap into the Daylight palette. Carto's gl styles use
 // well-named layers, so we classify by id/type and repaint role by role — robust
@@ -130,21 +133,26 @@ function useIsMobile() {
 // Continuously increasing seconds (wrapped well above any animation cycle).
 // The WindFlowLayer derives per-arrow drift from this, so keeping it smooth and
 // unwrapped avoids visible jumps when arrows animate at different rates.
-function useFlowPhase() {
+//
+// Each tick re-renders the app, so we cap the emit rate via minIntervalMs (30 fps
+// on phones) — the drift advances by real elapsed time, so motion stays the same
+// speed, we just spend half the CPU on a mobile GPU/CPU. 0 = every frame.
+function useFlowPhase(minIntervalMs = 0) {
   const [flowPhase, setFlowPhase] = useState(0);
   const rafRef = useRef<number>(0);
 
   useEffect(() => {
-    let last = performance.now();
+    let lastEmit = performance.now();
     const tick = (now: number) => {
-      const dt = now - last;
-      last = now;
-      setFlowPhase((p) => (p + dt / 1000) % 3600);
       rafRef.current = requestAnimationFrame(tick);
+      const dt = now - lastEmit;
+      if (dt < minIntervalMs) return;
+      lastEmit = now;
+      setFlowPhase((p) => (p + dt / 1000) % 3600);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, []);
+  }, [minIntervalMs]);
 
   return flowPhase;
 }
@@ -196,10 +204,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 const SNAP_DEG = 0.004;
 const BOUNDS_PAD = 0.25;
 const MAX_SPAN_DEG = 0.12;
+// Phones get a hard arrow budget (the nearest-to-centre N) so per-frame work stays
+// tiny and touch handling never starves. Desktops render the full field.
+const MOBILE_ARROW_CAP = 220;
 
 function MapApp() {
   const isMobile = useIsMobile();
-  const flowPhase = useFlowPhase();
+  // Animate at 20 fps on phones (a third of the per-frame React/layer work, leaving
+  // the main thread free for smooth taps & pans), 60 on desktop.
+  const flowPhase = useFlowPhase(isMobile ? 1000 / 20 : 0);
   const windowSize = useWindowSize();
 
   const initialViewState = useMemo(() => ({
@@ -234,20 +247,51 @@ function MapApp() {
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
 
-  // Build the routing graph once, the first time route planning is opened; cached
-  // thereafter (routeReady stays true, so toggling the panel never rebuilds it).
-  const [routeReady, setRouteReady] = useState(false);
-  const graph = useMemo(
-    () => (routeReady && roads ? buildGraph(roads) : null),
-    [routeReady, roads],
-  );
+  // Routing runs in a Web Worker (graph build + A* would otherwise freeze the UI,
+  // especially on phones). The worker owns the 121k-node graph; we post requests
+  // and receive route options asynchronously. Ranking by criterion is cheap (≤4
+  // options) so it stays on the main thread — switching criterion never re-plans.
+  const workerRef = useRef<Worker | null>(null);
+  const graphSentRef = useRef(false);
+  const reqIdRef = useRef(0);
+  const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
+  const [routeComputing, setRouteComputing] = useState(false);
 
-  const routeOptions = useMemo<RouteOption[]>(() => {
-    if (!routing || !graph || !start || !end || !windResult) return [];
-    const s = nearestNode(graph, start.lon, start.lat);
-    const g = nearestNode(graph, end.lon, end.lat);
-    return planRoutes(graph, s, g, windResult.wind);
-  }, [routing, graph, start, end, windResult]);
+  // Spin up the worker and hand it the road network the first time routing opens.
+  useEffect(() => {
+    if (!routing || !roads) return;
+    if (!workerRef.current) {
+      workerRef.current = new Worker(new URL("./routing/routingWorker.ts", import.meta.url), { type: "module" });
+      workerRef.current.onmessage = (e: MessageEvent<OutMsg>) => {
+        const msg = e.data;
+        if (msg.type === "routes") {
+          // Ignore results from a superseded request (rider moved a pin meanwhile).
+          if (msg.reqId !== reqIdRef.current) return;
+          setRouteOptions(msg.options);
+          setRouteComputing(false);
+        }
+      };
+    }
+    if (!graphSentRef.current) {
+      graphSentRef.current = true;
+      workerRef.current.postMessage({ type: "init", roads });
+    }
+  }, [routing, roads]);
+
+  useEffect(() => () => workerRef.current?.terminate(), []);
+
+  // Ask the worker for routes whenever the endpoints or live wind change.
+  useEffect(() => {
+    if (!routing || !workerRef.current) return;
+    if (!start || !end || !windResult) {
+      setRouteOptions([]);
+      setRouteComputing(false);
+      return;
+    }
+    const reqId = ++reqIdRef.current;
+    setRouteComputing(true);
+    workerRef.current.postMessage({ type: "plan", reqId, start, end, wind: windResult.wind });
+  }, [routing, start, end, windResult]);
 
   // Rank by the rider's chosen criterion; the winner is the highlighted "best".
   const { sorted: rankedRoutes, bestId } = useMemo(
@@ -265,7 +309,6 @@ function MapApp() {
   }, []);
 
   const toggleRouting = useCallback(() => {
-    setRouteReady(true); // once opened, keep the graph cached even if closed
     setRouting((r) => !r);
     setPinned(null); setHover(null);
   }, []);
@@ -300,8 +343,9 @@ function MapApp() {
   }, []);
 
   // Lazily pull the ~42 MB 3D-buildings file the first time the rider zooms in far
-  // enough to see extrusions — never on first paint, so the map opens fast.
-  const wantBuildings = !!roads && (viewState.zoom ?? 0) >= BUILDINGS_MIN_ZOOM;
+  // enough to see extrusions — never on first paint, so the map opens fast. Phones
+  // skip 3D entirely (the fetch + per-frame extrusion is the main mobile cost).
+  const wantBuildings = !isMobile && !!roads && (viewState.zoom ?? 0) >= BUILDINGS_MIN_ZOOM;
   useEffect(() => {
     if (!wantBuildings || buildingsReq.current) return;
     buildingsReq.current = true;
@@ -342,7 +386,10 @@ function MapApp() {
   }, [segments, wayHighways]);
 
   const zoom = viewState.zoom ?? initialViewState.zoom;
-  const density = arrowDensityForZoom(zoom);
+  // Phones never use the dense multi-arrow grid — one arrow per street, capped.
+  const density = isMobile
+    ? (arrowDensityForZoom(zoom) === "hidden" ? "hidden" : "single")
+    : arrowDensityForZoom(zoom);
 
   // Padded, snapped viewport box (as a stable string key). Recomputed every frame
   // but only changes value when the view moves across a snap cell.
@@ -380,11 +427,21 @@ function MapApp() {
   const windArrows = useMemo(() => {
     if (!enrichedSegments || !windResult || !boundsKey) return [];
     const [west, south, east, north] = boundsKey.split(",").map(Number);
-    const visible = enrichedSegments.filter(
+    let visible = enrichedSegments.filter(
       (s) => s.lon >= west && s.lon <= east && s.lat >= south && s.lat <= north,
     );
+    // Phone budget: keep only the arrows nearest the screen centre.
+    if (isMobile && visible.length > MOBILE_ARROW_CAP) {
+      const cx = (west + east) / 2;
+      const cy = (south + north) / 2;
+      visible = visible
+        .map((s) => ({ s, d: (s.lon - cx) ** 2 + (s.lat - cy) ** 2 }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, MOBILE_ARROW_CAP)
+        .map((x) => x.s);
+    }
     return buildWindArrows(visible, windResult.wind, density);
-  }, [enrichedSegments, windResult, density, boundsKey]);
+  }, [enrichedSegments, windResult, density, boundsKey, isMobile]);
 
   // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
   // footprints would choke the GPU. boundsKey already snaps to a coarse grid, so
@@ -402,45 +459,31 @@ function MapApp() {
     setViewState(constrainView(vs as typeof viewState));
   }, []);
 
-  const layers = useMemo(() => {
-    if (!roads) return [];
-    // The dark basemap already draws the road network, so no baseline overlay —
-    // cleaner and faster (no 24k extra lines).
+  // 3D building extrusions sit at the bottom of the stack. Memoised separately so
+  // they are NOT rebuilt on every animation frame (only when the visible set
+  // changes) — extruding ~thousands of footprints 60×/s would crush a phone.
+  const buildingLayers = useMemo(() => {
+    if (!roads || !visibleBuildings || visibleBuildings.length === 0) return [];
+    return [
+      new PolygonLayer<BuildingRow>({
+        id: "buildings",
+        data: visibleBuildings,
+        extruded: true,
+        getPolygon: (d) => d[1],
+        getElevation: (d) => d[0],
+        getFillColor: [...BUILDING_RGB, 244],
+        stroked: false,
+        // Matte, warmly-lit ivory — soft daylight shading, no harsh speculars.
+        material: { ambient: 0.72, diffuse: 0.55, shininess: 8, specularColor: [60, 58, 52] },
+        pickable: false,
+      }),
+    ];
+  }, [roads, visibleBuildings]);
+
+  // Routes + endpoints draw on TOP of the wind arrows. Also kept off the per-frame
+  // path so the route polylines aren't rebuilt while arrows animate.
+  const routeLayers = useMemo(() => {
     const result: any[] = [];
-    // 3D building extrusions sit at the bottom of the stack so wind arrows and
-    // routes always draw on top of them.
-    if (visibleBuildings && visibleBuildings.length > 0) {
-      result.push(
-        new PolygonLayer<BuildingRow>({
-          id: "buildings",
-          data: visibleBuildings,
-          extruded: true,
-          getPolygon: (d) => d[1],
-          getElevation: (d) => d[0],
-          getFillColor: [...BUILDING_RGB, 244],
-          stroked: false,
-          // Matte, warmly-lit ivory — soft daylight shading, no harsh speculars.
-          material: { ambient: 0.72, diffuse: 0.55, shininess: 8, specularColor: [60, 58, 52] },
-          pickable: false,
-        }),
-      );
-    }
-    if (windArrows.length > 0) {
-      result.push(
-        createWindFlowLayer({
-          data: windArrows,
-          flowPhase,
-          // While planning a route, clicks set waypoints instead of pinning arrows.
-          onHover: isMobile || routing ? undefined : (info) => {
-            setHover(info.object ? { x: info.x, y: info.y, arrow: info.object } : null);
-          },
-          onClick: routing ? undefined : (info) => {
-            if (info.object) setPinned({ x: info.x, y: info.y, arrow: info.object });
-            return true;
-          },
-        }),
-      );
-    }
     if (routing && rankedRoutes.length > 0) {
       // Draw unselected first, selected last so it sits on top.
       const ordered = [...rankedRoutes].sort(
@@ -488,7 +531,30 @@ function MapApp() {
       );
     }
     return result;
-  }, [roads, visibleBuildings, windArrows, flowPhase, isMobile, routing, rankedRoutes, selectedRoute, bestId, start, end]);
+  }, [routing, rankedRoutes, selectedRoute, bestId, start, end]);
+
+  // Only the wind layer is rebuilt per frame (flowPhase). The reused building/route
+  // layer instances above are passed through unchanged, so deck.gl skips them.
+  const windLayer = useMemo(() => {
+    if (windArrows.length === 0) return null;
+    return createWindFlowLayer({
+      data: windArrows,
+      flowPhase,
+      // While planning a route, clicks set waypoints instead of pinning arrows.
+      onHover: isMobile || routing ? undefined : (info) => {
+        setHover(info.object ? { x: info.x, y: info.y, arrow: info.object } : null);
+      },
+      onClick: routing ? undefined : (info) => {
+        if (info.object) setPinned({ x: info.x, y: info.y, arrow: info.object });
+        return true;
+      },
+    });
+  }, [windArrows, flowPhase, isMobile, routing]);
+
+  const layers = useMemo(
+    () => [...buildingLayers, ...(windLayer ? [windLayer] : []), ...routeLayers],
+    [buildingLayers, windLayer, routeLayers],
+  );
 
   const stillLoading = !roads || !segments;
   const showWindError = windError && !windResult;
@@ -509,18 +575,31 @@ function MapApp() {
   }, [routing, start, end]);
 
   const routeDrawerStyle: React.CSSProperties = isMobile
-    ? { position: "absolute", bottom: 8, left: 8, right: 8, zIndex: 25 }
+    ? {
+        position: "absolute",
+        bottom: "calc(env(safe-area-inset-bottom) + 8px)",
+        left: "calc(env(safe-area-inset-left) + 8px)",
+        right: "calc(env(safe-area-inset-right) + 8px)",
+        zIndex: 25,
+      }
     : { position: "absolute", top: 78, left: 14, zIndex: 25 };
   const legendStyle: React.CSSProperties = isMobile
-    ? { position: "absolute", bottom: pinned ? 200 : 10, left: 10, zIndex: 20 }
+    ? {
+        position: "absolute",
+        bottom: pinned ? 200 : "calc(env(safe-area-inset-bottom) + 10px)",
+        left: "calc(env(safe-area-inset-left) + 10px)",
+        zIndex: 20,
+      }
     : { position: "absolute", bottom: 16, right: 16, zIndex: 20 };
 
   return (
-    <div style={{ position: "relative", width: "100vw", height: "100vh", background: THEME.land, overflow: "hidden" }}>
+    <div className="app-root" style={{ position: "relative", background: THEME.land, overflow: "hidden" }}>
       <DeckGL
         initialViewState={initialViewState}
         viewState={viewState}
         onViewStateChange={onViewStateChange}
+        // `true` (a stable primitive) — a controller *object* here re-inits gestures
+        // and breaks tap-to-place waypoints on touch. Keep deck's standard handling.
         controller={true}
         layers={layers}
         getCursor={({ isDragging }) => (isDragging ? "grabbing" : routing ? "crosshair" : "grab")}
@@ -544,7 +623,7 @@ function MapApp() {
       />
 
       {/* Transient status chips, centered just under the bar */}
-      <div style={{ position: "absolute", top: isMobile ? 58 : 76, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 8, zIndex: 20, pointerEvents: "none" }}>
+      <div style={{ position: "absolute", top: isMobile ? "calc(env(safe-area-inset-top) + 58px)" : 76, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 8, zIndex: 20, pointerEvents: "none" }}>
         {showDataError && <div className="ui-fade" style={statusChip(COLORS.bad)}>Data error: {dataError!.message}</div>}
         {showWindError && <div className="ui-fade" style={statusChip(COLORS.bad)}>Wind error: {windError!.message}</div>}
         {stillLoading && !dataError && <div className="ui-fade" style={statusChip(COLORS.dim)}>Loading streets…</div>}
@@ -558,7 +637,7 @@ function MapApp() {
             onToggle={toggleRouting}
             start={start}
             end={end}
-            building={routing && !graph}
+            building={routeComputing}
             gpsLoading={gpsLoading}
             gpsError={gpsError}
             onUseGps={useGps}
@@ -588,6 +667,7 @@ function MapApp() {
           y={activeTip.y}
           streetName={wayNames.get(String(activeTip.arrow.wayId)) ?? null}
           modifiedSpeedMs={activeTip.arrow.speedMs}
+          gustMs={activeTip.arrow.gustMs}
           travelDeg={activeTip.arrow.flowDeg}
           bearingDeg={activeTip.arrow.bearingDeg}
           canyonH={activeTip.arrow.canyonH}

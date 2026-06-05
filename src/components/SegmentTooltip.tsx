@@ -1,13 +1,15 @@
 // src/components/SegmentTooltip.tsx
 import type { GeometrySource } from "../math";
 import { windBand, streetImpact, type RGB } from "../cyclist/windCategory";
-import { glass, COLORS } from "./ui";
+import { glass, COLORS, NUM } from "./ui";
 
 interface Props {
   x: number;
   y: number;
   streetName: string | null;
   modifiedSpeedMs: number;
+  /** Canyon-scaled gust speed on the street, m/s (undefined if none reported). */
+  gustMs?: number;
   travelDeg: number;
   /** Street axis A→B, deg CW from N — needed for head/tailwind decomposition. */
   bearingDeg: number;
@@ -47,10 +49,12 @@ const SOURCE_LABELS: Record<GeometrySource, string> = {
 };
 
 export default function SegmentTooltip({
-  x, y, streetName, modifiedSpeedMs, travelDeg, bearingDeg, canyonH, canyonW,
+  x, y, streetName, modifiedSpeedMs, gustMs, travelDeg, bearingDeg, canyonH, canyonW,
   leftHeightM, rightHeightM, geometrySource, laneIndex, laneCount,
   variant, onClose,
 }: Props) {
+  // Only call it a gust when it meaningfully exceeds the mean (≥10% and ≥1 m/s over).
+  const showGust = gustMs != null && gustMs >= modifiedSpeedMs * 1.1 && gustMs - modifiedSpeedMs >= 1;
   const strength = windBand(modifiedSpeedMs);
   const impact = streetImpact(modifiedSpeedMs, travelDeg, bearingDeg);
   const lambda = canyonW > 0 ? canyonH / canyonW : 0;
@@ -62,13 +66,18 @@ export default function SegmentTooltip({
 
   const positionStyle =
     variant === "sheet"
-      ? { left: 8, right: 8, bottom: 8 }
+      ? {
+          left: "calc(env(safe-area-inset-left) + 8px)",
+          right: "calc(env(safe-area-inset-right) + 8px)",
+          bottom: "calc(env(safe-area-inset-bottom) + 8px)",
+        }
       : { left: x + 14, top: y + 14, maxWidth: 280 };
 
   return (
     <div
       style={{
         ...glass,
+        ...NUM,
         position: "absolute",
         pointerEvents: variant === "sheet" ? "auto" : "none",
         padding: "12px 14px",
@@ -105,6 +114,12 @@ export default function SegmentTooltip({
           <span style={{ marginLeft: 6 }}><Chip color={strength.color} label={strength.label} /></span>
         </span>
       </div>
+      {showGust && (
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+          <span style={{ color: COLORS.dim }}>Gusting to</span>
+          <span style={{ fontWeight: 600 }}>{gustMs!.toFixed(1)} m/s</span>
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
         <span style={{ color: COLORS.dim }}>Blowing toward</span>
         <span>{compassPoint(travelDeg)} ({Math.round(travelDeg)}°)</span>

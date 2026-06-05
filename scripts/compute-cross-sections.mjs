@@ -9,6 +9,11 @@ const OUTPUT_PATH = "public/data/cph-segments.json";
 
 const MAX_SEARCH_M = 40;
 const MIN_SEGMENT_M = 20;
+// A way whose every sub-segment is shorter than MIN_SEGMENT_M gets no arrow at
+// all. To still show wind on short streets/cycleways, emit one representative
+// segment per such way as long as its longest piece is at least this long
+// (skips sub-6m intersection stubs, which would be pure noise).
+const MIN_COVERAGE_M = 6;
 const CENTROID_FALLBACK_RADIUS_M = 25;
 
 const WIDTHS = {
@@ -204,7 +209,79 @@ async function main() {
   console.log("Computing per-segment cross-sections...");
   const segments = [];
   const stats = { measured: 0, partial: 0, fallback: 0 };
+  let coverageFallbacks = 0;
   let n = 0;
+
+  // Build one segment's cross-section by ray-casting both kerbs from its midpoint.
+  // Closes over the spatial indices above; returns the segment record (with its
+  // geometrySource set) or null for a degenerate (zero-length) piece.
+  function buildSegment(lonA, latA, lonB, latB, segLen, wayId, defaultWidth, osmWidth) {
+    const a = toLocal(lonA, latA);
+    const b = toLocal(lonB, latB);
+    const midX = (a.x + b.x) / 2;
+    const midY = (a.y + b.y) / 2;
+    const midLonLat = toLonLat(midX, midY);
+    const brg = bearingDeg(lonA, latA, lonB, latB);
+    const brgRad = (brg * Math.PI) / 180;
+
+    // Left = +90° from travel (west when heading north)
+    const leftDirX = -Math.cos(brgRad);
+    const leftDirY = Math.sin(brgRad);
+    const rightDirX = Math.cos(brgRad);
+    const rightDirY = -Math.sin(brgRad);
+
+    const leftHit = castRay(buildings, polyIndex, midX, midY, leftDirX, leftDirY);
+    const rightHit = castRay(buildings, polyIndex, midX, midY, rightDirX, rightDirY);
+
+    let leftDist = leftHit.hit ? leftHit.distanceM : 0;
+    let rightDist = rightHit.hit ? rightHit.distanceM : 0;
+    let leftHeightM = leftHit.hit ? leftHit.heightM : 0;
+    let rightHeightM = rightHit.hit ? rightHit.heightM : 0;
+
+    let geometrySource;
+    if (leftHit.hit && rightHit.hit) {
+      geometrySource = "measured";
+    } else if (leftHit.hit || rightHit.hit) {
+      geometrySource = "partial";
+      const half = (osmWidth ?? defaultWidth) / 2;
+      if (!leftHit.hit) {
+        leftDist = rightHit.hit ? rightDist : half;
+        leftHeightM = rightHeightM;
+      }
+      if (!rightHit.hit) {
+        rightDist = leftHit.hit ? leftDist : half;
+        rightHeightM = leftHeightM;
+      }
+    } else {
+      geometrySource = "fallback";
+      const fallbackH = centroidFallbackHeights(centroidIndex, bX, bY, bH, midX, midY);
+      const widthM = osmWidth ?? defaultWidth;
+      leftDist = widthM / 2;
+      rightDist = widthM / 2;
+      leftHeightM = fallbackH;
+      rightHeightM = fallbackH;
+    }
+
+    const widthM = leftDist + rightDist;
+    const canyonH = (leftHeightM + rightHeightM) / 2;
+
+    return {
+      wayId,
+      lon: midLonLat.lon,
+      lat: midLonLat.lat,
+      bearingDeg: brg,
+      segmentLengthM: segLen,
+      widthM,
+      leftDistM: leftDist,
+      rightDistM: rightDist,
+      leftHeightM,
+      rightHeightM,
+      canyonH,
+      canyonW: widthM,
+      laneOffsetsM: laneOffsets(widthM),
+      geometrySource,
+    };
+  }
 
   for (const feature of roads.features) {
     if (feature.geometry.type !== "LineString") continue;
@@ -212,6 +289,10 @@ async function main() {
     const highway = feature.properties.highway || "default";
     const defaultWidth = WIDTHS[highway] ?? DEFAULT_WIDTH;
     const osmWidth = parseOsmWidth(feature.properties);
+    const wayId = feature.properties.id;
+
+    let featureCount = 0;
+    let longest = null; // the longest sub-segment seen, for the coverage fallback
 
     for (let i = 0; i < coords.length - 1; i++) {
       const [lonA, latA] = coords[i];
@@ -219,81 +300,30 @@ async function main() {
       const a = toLocal(lonA, latA);
       const b = toLocal(lonB, latB);
       const segLen = dist(a.x, a.y, b.x, b.y);
+      if (!longest || segLen > longest.segLen) longest = { lonA, latA, lonB, latB, segLen };
       if (segLen < MIN_SEGMENT_M) continue;
 
-      const midX = (a.x + b.x) / 2;
-      const midY = (a.y + b.y) / 2;
-      const midLonLat = toLonLat(midX, midY);
-      const brg = bearingDeg(lonA, latA, lonB, latB);
-      const brgRad = (brg * Math.PI) / 180;
-
-      // Left = +90° from travel (west when heading north)
-      const leftDirX = -Math.cos(brgRad);
-      const leftDirY = Math.sin(brgRad);
-      const rightDirX = Math.cos(brgRad);
-      const rightDirY = -Math.sin(brgRad);
-
-      const leftHit = castRay(buildings, polyIndex, midX, midY, leftDirX, leftDirY);
-      const rightHit = castRay(buildings, polyIndex, midX, midY, rightDirX, rightDirY);
-
-      let leftDist = leftHit.hit ? leftHit.distanceM : 0;
-      let rightDist = rightHit.hit ? rightHit.distanceM : 0;
-      let leftHeightM = leftHit.hit ? leftHit.heightM : 0;
-      let rightHeightM = rightHit.hit ? rightHit.heightM : 0;
-
-      let geometrySource;
-      if (leftHit.hit && rightHit.hit) {
-        geometrySource = "measured";
-        stats.measured++;
-      } else if (leftHit.hit || rightHit.hit) {
-        geometrySource = "partial";
-        stats.partial++;
-        const half = (osmWidth ?? defaultWidth) / 2;
-        if (!leftHit.hit) {
-          leftDist = rightHit.hit ? rightDist : half;
-          leftHeightM = rightHeightM;
-        }
-        if (!rightHit.hit) {
-          rightDist = leftHit.hit ? leftDist : half;
-          rightHeightM = leftHeightM;
-        }
-      } else {
-        geometrySource = "fallback";
-        stats.fallback++;
-        const fallbackH = centroidFallbackHeights(centroidIndex, bX, bY, bH, midX, midY);
-        const widthM = osmWidth ?? defaultWidth;
-        leftDist = widthM / 2;
-        rightDist = widthM / 2;
-        leftHeightM = fallbackH;
-        rightHeightM = fallbackH;
-      }
-
-      const widthM = leftDist + rightDist;
-      const canyonH = (leftHeightM + rightHeightM) / 2;
-
-      segments.push({
-        wayId: feature.properties.id,
-        lon: midLonLat.lon,
-        lat: midLonLat.lat,
-        bearingDeg: brg,
-        segmentLengthM: segLen,
-        widthM,
-        leftDistM: leftDist,
-        rightDistM: rightDist,
-        leftHeightM,
-        rightHeightM,
-        canyonH,
-        canyonW: widthM,
-        laneOffsetsM: laneOffsets(widthM),
-        geometrySource,
-      });
+      const s = buildSegment(lonA, latA, lonB, latB, segLen, wayId, defaultWidth, osmWidth);
+      segments.push(s);
+      stats[s.geometrySource]++;
+      featureCount++;
 
       n++;
       if (n % 20000 === 0) console.log(`  ${n} segments...`);
     }
+
+    // Coverage fallback: ways with no long-enough piece still get one arrow.
+    if (featureCount === 0 && longest && longest.segLen >= MIN_COVERAGE_M) {
+      const s = buildSegment(longest.lonA, longest.latA, longest.lonB, longest.latB, longest.segLen, wayId, defaultWidth, osmWidth);
+      segments.push(s);
+      stats[s.geometrySource]++;
+      coverageFallbacks++;
+      n++;
+    }
   }
 
   console.log(`Total segments: ${segments.length}`);
+  console.log(`  (incl. ${coverageFallbacks} coverage fallbacks for short ways)`);
   console.log("Geometry sources:");
   console.log(`  measured: ${stats.measured}`);
   console.log(`  partial:  ${stats.partial}`);

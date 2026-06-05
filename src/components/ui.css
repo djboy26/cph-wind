@@ -36,10 +36,11 @@
 
 /* Interactive lift for buttons / cards */
 .lift {
-  transition: transform 0.14s ease, background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+  transition: transform 0.16s cubic-bezier(0.2, 0.7, 0.2, 1), background 0.16s ease,
+    border-color 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
 }
-.lift:hover { transform: translateY(-1px); filter: brightness(1.03); box-shadow: 0 6px 18px rgba(40,52,74,0.12); }
-.lift:active { transform: translateY(0) scale(0.99); filter: brightness(0.98); }
+.lift:hover { transform: translateY(-1px); filter: brightness(1.02); box-shadow: 0 8px 22px rgba(20, 32, 43, 0.14); }
+.lift:active { transform: translateY(0) scale(0.985); filter: brightness(0.99); }
 
 /* Live "breathing" dot */
 .live-dot {
@@ -53,9 +54,18 @@
 
 .spin { animation: ui-spin 0.9s linear infinite; }
 
-button.lift:focus-visible {
-  outline: 2px solid rgba(91, 157, 255, 0.7);
+button.lift:focus-visible,
+button:focus-visible {
+  outline: 2px solid rgba(47, 106, 240, 0.65);
   outline-offset: 2px;
+}
+
+/* Respect reduced-motion: keep everything legible, just stop the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .ui-fade, .ui-up, .ui-down, .ui-left, .ui-sheet, .lift, .spin, .live-dot {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /* Hide native scrollbars inside panels but keep scroll */

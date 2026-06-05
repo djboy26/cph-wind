@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { WIND_BANDS } from "../cyclist/windCategory";
-import { glass, pill, COLORS } from "./ui";
+import { glass, pill, COLORS, NUM, label } from "./ui";
 
 function rangeLabel(minMs: number, maxMs: number): string {
   return maxMs === Infinity ? `${minMs}+` : `${minMs}–${maxMs}`;
@@ -32,9 +32,7 @@ export default function Legend({ isMobile }: { isMobile: boolean }) {
   return (
     <div className="ui-up" style={{ ...glass, padding: "11px 15px", minWidth: 232 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}>
-        <span style={{ fontSize: 10.5, color: COLORS.faint, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.8 }}>
-          Wind on street (m/s)
-        </span>
+        <span style={label}>Wind on street (m/s)</span>
         <button
           onClick={() => setOpen(false)}
           aria-label="Collapse legend"
@@ -52,7 +50,7 @@ export default function Legend({ isMobile }: { isMobile: boolean }) {
               }}
             />
             <span style={{ fontSize: 11.5, fontWeight: 600, width: 74, color: COLORS.text }}>{b.label}</span>
-            <span style={{ fontSize: 11, color: COLORS.dim, width: 36, textAlign: "right" }}>{rangeLabel(b.minMs, b.maxMs)}</span>
+            <span style={{ fontSize: 11, color: COLORS.dim, width: 36, textAlign: "right", ...NUM }}>{rangeLabel(b.minMs, b.maxMs)}</span>
             <span style={{ fontSize: 10, color: COLORS.faint }}>{b.blurb}</span>
           </div>
         ))}

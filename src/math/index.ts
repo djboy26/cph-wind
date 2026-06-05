@@ -125,9 +125,16 @@ export function alongStreetWind(streetBearingDeg: number, wind: Wind): AlongStre
  * direction and modified magnitude.
  *
  * - λ = H/W is the canyon aspect ratio.
- * - λ < 0.1: ambient wind returned unchanged.
- * - λ ≈ 1.0: ~70% of cross-component blocked, ~20% along-component amplified.
- * - λ ≥ 2:   cross-component nearly fully blocked.
+ * - λ < 0.1:   ambient wind returned unchanged (open / very wide street).
+ * - λ ≈ 0.36:  Copenhagen median — ~48% of cross-component blocked.
+ * - λ ≳ 0.65:  skimming-flow regime — cross-component largely blocked, so the
+ *              street-level wind aligns strongly with the street axis.
+ * - λ ≥ 1.5:   cross-component ~95% blocked; wind funnels almost fully along.
+ *
+ * The cross attenuation is exponential in λ (not the gentle linear blend used
+ * earlier, which barely rotated wind at Copenhagen's typical aspect ratios and
+ * made every street read the same direction). This is what makes a wind-aligned
+ * street flow fast-and-straight while a perpendicular street goes calm.
  *
  * Reference: Soulhac, Salizzoni, Cierco, Perkins (2008), Atmos Env 42(31).
  */
@@ -152,8 +159,11 @@ export function canyonModifiedWind(
   const wCrossX = Wx - wAlong * Sx;
   const wCrossY = Wy - wAlong * Sy;
 
-  const alongFactor = 1 + 0.2 * Math.min(lambda, 2);
-  const crossFactor = 1 - 0.7 * (1 - Math.exp(-lambda));
+  // Along-canyon channeling speedup (capped ~1.45 for deep canyons), and an
+  // exponential cross-canyon blockage so skimming flow (λ≳0.65) funnels wind
+  // along the street rather than across it.
+  const alongFactor = 1 + 0.3 * Math.min(lambda, 1.5);
+  const crossFactor = Math.max(0.05, Math.exp(-1.8 * lambda));
 
   const modX = wAlong * alongFactor * Sx + wCrossX * crossFactor;
   const modY = wAlong * alongFactor * Sy + wCrossY * crossFactor;
@@ -190,6 +200,8 @@ export interface LaneWind {
   speedMs: number;
   /** Compass direction (deg CW from N) the wind flows at this lane. */
   flowDeg: number;
+  /** Canyon-scaled gust speed at this lane, m/s (undefined if no gust reported). */
+  gustMs?: number;
 }
 
 export interface SegmentInput {
@@ -270,6 +282,7 @@ export function asymmetricCanyonWindAtLane(
     offsetM,
     speedMs: modified.speedMs,
     flowDeg: windToFlowDeg(modified),
+    gustMs: modified.gustMs,
   };
 }
 

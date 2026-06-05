@@ -1,0 +1,19 @@
+{
+  "name": "Copenhagen Wind — live cycling wind map",
+  "short_name": "CPH Wind",
+  "description": "Live per-street wind for Copenhagen cyclists, modified by building geometry. Updates every 10 minutes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2ede2",
+  "theme_color": "#f2ede2",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

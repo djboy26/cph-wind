@@ -2,7 +2,8 @@
 // One-time tip shown on first visit, dismissed to localStorage.
 
 import { useState } from "react";
-import { glass, COLORS } from "./ui";
+import { glass, pillActive, COLORS } from "./ui";
+import { Icon, type IconName } from "./Icon";
 
 const KEY = "cphwind.onboarded.v1";
 
@@ -10,10 +11,10 @@ function seenBefore(): boolean {
   try { return !!localStorage.getItem(KEY); } catch { return false; }
 }
 
-const TIPS = [
-  { icon: "🔍", text: "Zoom in for wind on every street" },
-  { icon: "👆", text: "Click a street for headwind / tailwind" },
-  { icon: "🧭", text: "Plan a route and compare it by wind" },
+const TIPS: { icon: IconName; text: string }[] = [
+  { icon: "search", text: "Zoom in for wind on every street" },
+  { icon: "tap", text: "Tap a street for headwind / tailwind" },
+  { icon: "route", text: "Plan a route and compare it by wind" },
 ];
 
 export default function OnboardingHint({ isMobile }: { isMobile: boolean }) {
@@ -46,8 +47,8 @@ export default function OnboardingHint({ isMobile }: { isMobile: boolean }) {
     >
       <div style={{ display: "flex", gap: isMobile ? 12 : 18, flexWrap: "wrap" }}>
         {TIPS.map((t) => (
-          <span key={t.text} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: COLORS.dim, whiteSpace: "nowrap" }}>
-            <span style={{ fontSize: 15 }}>{t.icon}</span>
+          <span key={t.text} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: COLORS.dim, whiteSpace: "nowrap" }}>
+            <Icon name={t.icon} size={16} color={COLORS.accent} />
             {t.text}
           </span>
         ))}
@@ -56,15 +57,11 @@ export default function OnboardingHint({ isMobile }: { isMobile: boolean }) {
         className="lift"
         onClick={dismiss}
         style={{
-          border: "1px solid rgba(46,124,246,0.5)",
-          background: "rgba(46,124,246,0.12)",
-          color: "#1a52c9",
-          borderRadius: 9,
-          padding: "6px 14px",
+          ...pillActive,
+          borderRadius: 10,
+          padding: "7px 16px",
           fontSize: 12.5,
           fontWeight: 600,
-          cursor: "pointer",
-          fontFamily: "inherit",
           whiteSpace: "nowrap",
         }}
       >

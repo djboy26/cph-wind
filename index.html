@@ -3,9 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/arrow.svg" />
+
+    <!-- Inter: clean Nordic grotesk for the UI. Preconnect + swap so it never blocks paint. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="description" content="Live per-street wind visualization for Copenhagen cyclists. Real-time wind direction and speed mapped onto every street, modified by urban canyon channeling around buildings." />
-    <meta name="theme-color" content="#0e0f13" />
+    <!-- Matches the light "Copenhagen Morning" land colour so the mobile browser chrome blends in. -->
+    <meta name="theme-color" content="#f2ede2" />
+
+    <!-- Add to Home Screen: launches full-screen like an app on iOS & Android. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="CPH Wind" />
+    <link rel="apple-touch-icon" href="/app-icon.svg" />
 
     <meta property="og:title" content="København Wind — Live cycling wind map" />
     <meta property="og:description" content="Per-street wind for Copenhagen cyclists, modified by building geometry. Live updates every 10 minutes." />

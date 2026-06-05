@@ -2,7 +2,8 @@
 // Floating header: brand identity + live regional wind + primary actions.
 
 import type { Wind } from "../math";
-import { glass, pill, pillActive, COLORS } from "./ui";
+import { glass, pill, pillActive, COLORS, NUM } from "./ui";
+import { Icon } from "./Icon";
 
 interface Props {
   wind: Wind | null;
@@ -55,7 +56,7 @@ export default function TopBar({ wind, timestamp, loading, routingActive, onPlan
       <span className="live-dot" />
       <WindDial deg={deg} size={isMobile ? 24 : 30} />
       <div style={{ lineHeight: 1.12 }}>
-        <div style={{ fontSize: isMobile ? 15 : 17, fontWeight: 700, letterSpacing: -0.3, color: COLORS.text }}>
+        <div style={{ fontSize: isMobile ? 15 : 17, fontWeight: 700, letterSpacing: -0.3, color: COLORS.text, ...NUM }}>
           {loading || !wind ? "—" : wind.speedMs.toFixed(1)}
           <span style={{ fontSize: 10.5, color: COLORS.dim, marginLeft: 3, fontWeight: 500 }}>m/s</span>
         </div>
@@ -73,9 +74,10 @@ export default function TopBar({ wind, timestamp, loading, routingActive, onPlan
       style={{
         ...glass,
         position: "absolute",
-        top: isMobile ? 8 : 14,
-        left: isMobile ? 8 : 14,
-        right: isMobile ? 8 : 14,
+        // Clear the notch / status bar on phones (viewport-fit=cover).
+        top: isMobile ? "calc(env(safe-area-inset-top) + 8px)" : 14,
+        left: isMobile ? "calc(env(safe-area-inset-left) + 8px)" : 14,
+        right: isMobile ? "calc(env(safe-area-inset-right) + 8px)" : 14,
         zIndex: 30,
         display: "flex",
         alignItems: "center",
@@ -90,7 +92,7 @@ export default function TopBar({ wind, timestamp, loading, routingActive, onPlan
       <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14 }}>
         {!isMobile && liveWind}
         {isMobile && (
-          <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.text, display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.text, display: "flex", alignItems: "center", gap: 6, ...NUM }}>
             <span className="live-dot" />
             {loading || !wind ? "—" : `${wind.speedMs.toFixed(1)}`}
             <span style={{ fontSize: 10, color: COLORS.faint, fontWeight: 500 }}>m/s {wind ? compassPoint(deg) : ""}</span>
@@ -99,17 +101,19 @@ export default function TopBar({ wind, timestamp, loading, routingActive, onPlan
         <button
           className="lift"
           onClick={onPlanRoute}
-          style={{ ...(routingActive ? pillActive : pill), padding: isMobile ? "7px 10px" : "8px 14px", fontWeight: 600, whiteSpace: "nowrap" }}
+          aria-label="Plan route"
+          style={{ ...(routingActive ? pillActive : pill), display: "flex", alignItems: "center", gap: 7, padding: isMobile ? "8px 11px" : "8px 14px", fontWeight: 600, whiteSpace: "nowrap" }}
         >
-          {isMobile ? "🧭" : "🧭 Plan route"}
+          <Icon name="route" size={16} />
+          {!isMobile && "Plan route"}
         </button>
         <button
           className="lift"
           onClick={onAbout}
           aria-label="About"
-          style={{ ...pill, width: 34, height: 34, padding: 0, borderRadius: "50%", fontFamily: "Georgia, serif", fontStyle: "italic", fontWeight: 700 }}
+          style={{ ...pill, display: "flex", alignItems: "center", justifyContent: "center", width: isMobile ? 38 : 36, height: isMobile ? 38 : 36, padding: 0, borderRadius: "50%" }}
         >
-          i
+          <Icon name="info" size={17} color={COLORS.dim} />
         </button>
       </div>
     </header>
