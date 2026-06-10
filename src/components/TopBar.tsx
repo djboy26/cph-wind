@@ -5,7 +5,7 @@
 
 import type { Wind } from "../math";
 import { feelsLikeC } from "../cyclist/feelsLike";
-import { glass, pill, COLORS, NUM, FONT } from "./ui";
+import { glass, COLORS, NUM, FONT } from "./ui";
 import { Icon } from "./Icon";
 
 interface Props {
@@ -86,7 +86,7 @@ export default function TopBar({ wind, tempC, timestamp, loading, routingActive,
       <WindDial deg={deg} size={32} />
       <div style={{ lineHeight: 1.1 }}>
         <div style={{ fontWeight: 700, fontSize: 15.5, letterSpacing: -0.3, color: COLORS.text }}>Copenhagen Wind</div>
-        <div style={{ fontSize: 10.5, color: COLORS.faint, letterSpacing: 0.3 }}>live cycling wind map</div>
+        <div style={{ fontSize: 10.5, color: COLORS.faint, letterSpacing: 0.3 }}>Live wind, street by street</div>
       </div>
     </div>
   );
@@ -144,9 +144,9 @@ export default function TopBar({ wind, tempC, timestamp, loading, routingActive,
           className="lift"
           onClick={onAbout}
           aria-label="About"
-          style={{ ...pill, display: "flex", alignItems: "center", justifyContent: "center", width: isMobile ? 38 : 36, height: isMobile ? 38 : 36, padding: 0, borderRadius: "50%" }}
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: isMobile ? 38 : 36, height: isMobile ? 38 : 36, padding: 0, borderRadius: "50%", border: "none", background: "transparent", color: COLORS.faint, cursor: "pointer" }}
         >
-          <Icon name="info" size={17} color={COLORS.dim} />
+          <Icon name="info" size={18} color={COLORS.faint} />
         </button>
       </div>
     </header>

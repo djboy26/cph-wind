@@ -1,95 +1,104 @@
 // src/components/About.tsx
 // Methodology + attribution modal (controlled; trigger lives in the top bar).
 
-import { glass, COLORS, FONT } from "./ui";
+import { glass, COLORS, FONT, label } from "./ui";
+import { Icon } from "./Icon";
 
-const link: React.CSSProperties = { color: COLORS.accent, textDecoration: "none" };
-const h3: React.CSSProperties = { fontSize: 15, marginTop: 18, marginBottom: 6, color: COLORS.text };
+const link: React.CSSProperties = { color: COLORS.accent, textDecoration: "none", fontWeight: 500 };
+const section: React.CSSProperties = { ...label, display: "block", marginTop: 20, marginBottom: 8 };
+const para: React.CSSProperties = { margin: "0 0 10px", color: COLORS.dim };
 
 export default function About({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
 
   return (
-    <>
-      {(
+    <div
+      className="ui-fade"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(22,31,43,0.4)",
+        backdropFilter: "blur(3px)",
+        WebkitBackdropFilter: "blur(3px)",
+        zIndex: 100,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        className="ui-up thin-scroll"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          ...glass,
+          maxWidth: 540,
+          maxHeight: "85vh",
+          overflowY: "auto",
+          padding: "22px 26px 26px",
+          fontSize: 14,
+          lineHeight: 1.55,
+        }}
+      >
         <div
-          className="ui-fade"
-          onClick={onClose}
           style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(22,31,43,0.4)",
-            backdropFilter: "blur(3px)",
-            WebkitBackdropFilter: "blur(3px)",
-            zIndex: 100,
             display: "flex",
+            justifyContent: "space-between",
             alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
+            marginBottom: 16,
+            paddingBottom: 14,
+            borderBottom: `1px solid ${COLORS.hairline}`,
           }}
         >
-          <div
-            className="ui-up thin-scroll"
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              ...glass,
-              maxWidth: 560,
-              maxHeight: "85vh",
-              overflowY: "auto",
-              padding: "24px 28px",
-              fontSize: 14,
-              lineHeight: 1.55,
-            }}
+          <h2 style={{ margin: 0, fontSize: 19, fontWeight: 700, letterSpacing: -0.3, color: COLORS.text }}>Copenhagen Wind</h2>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="lift"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, padding: 0, borderRadius: "50%", border: "none", background: "transparent", cursor: "pointer", fontFamily: FONT }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 12 }}>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: COLORS.text }}>Copenhagen Wind</h2>
-              <button
-                onClick={onClose}
-                aria-label="Close"
-                style={{ border: "none", background: "transparent", fontSize: 24, cursor: "pointer", color: COLORS.dim, lineHeight: 1, padding: 0, fontFamily: FONT }}
-              >×</button>
-            </div>
-
-            <p style={{ color: COLORS.dim }}>
-              Live wind blowing along every street in Greater Copenhagen, combining regional weather
-              with each street's local building geometry — so cyclists can see where the wind helps or
-              hurts, and plan a route around it.
-            </p>
-
-            <h3 style={h3}>How the wind is calculated</h3>
-            <p style={{ margin: "6px 0", color: COLORS.dim }}>
-              The regional wind (one value, refreshed every 10 min) comes from MET Norway's
-              Locationforecast (yr.no). For each street, perpendicular rays from the centreline find the
-              nearest left/right building walls (from OpenStreetMap footprints), giving the street width
-              and flanking wall heights.
-            </p>
-            <p style={{ margin: "6px 0", color: COLORS.dim }}>
-              An urban-canyon model (Soulhac et al., 2008) then channels that wind: flow along the street
-              is amplified, flow across it is attenuated. Arrows are confined to the carriageway and
-              coloured by a cyclist wind-strength scale; click a street for the head/tailwind impact.
-            </p>
-
-            <h3 style={h3}>Accuracy</h3>
-            <p style={{ margin: "6px 0", color: COLORS.dim }}>
-              The regional input is validated hourly against real observations from DMI weather stations
-              and Copenhagen Airport (METAR). The per-street values are a physically-motivated model, not
-              a measurement — true street-level wind would need an anemometer on the street.
-            </p>
-
-            <h3 style={h3}>Data &amp; attribution</h3>
-            <ul style={{ margin: "6px 0", paddingLeft: 20, fontSize: 13, color: COLORS.dim }}>
-              <li>Roads &amp; buildings: © <a style={link} href="https://openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a> (ODbL)</li>
-              <li>Weather: <a style={link} href="https://api.met.no/" target="_blank" rel="noreferrer">MET Norway</a> (CC BY 4.0); validation obs <a style={link} href="https://www.dmi.dk/" target="_blank" rel="noreferrer">DMI</a></li>
-              <li>Basemap: © <a style={link} href="https://carto.com/attributions" target="_blank" rel="noreferrer">CARTO</a></li>
-              <li>Engine: <a style={link} href="https://maplibre.org/" target="_blank" rel="noreferrer">MapLibre GL</a>, <a style={link} href="https://deck.gl/" target="_blank" rel="noreferrer">deck.gl</a></li>
-            </ul>
-
-            <p style={{ fontSize: 12, color: COLORS.faint, marginTop: 18, marginBottom: 0 }}>
-              Source on <a style={link} href="https://github.com/djboy26/cph-wind" target="_blank" rel="noreferrer">GitHub</a>.
-            </p>
-          </div>
+            <Icon name="close" size={17} color={COLORS.dim} />
+          </button>
         </div>
-      )}
-    </>
+
+        <p style={{ margin: 0, color: COLORS.text, fontSize: 14.5, lineHeight: 1.5 }}>
+          Live wind along every street in Greater Copenhagen — regional weather combined with each
+          street's building geometry, so you can see where the wind helps or hurts and plan around it.
+        </p>
+
+        <div style={section}>How the wind is calculated</div>
+        <p style={para}>
+          The regional wind (one value, refreshed every 10&nbsp;min) comes from MET Norway's
+          Locationforecast (yr.no). For each street, perpendicular rays from the centreline find the
+          nearest left/right building walls (OpenStreetMap footprints) — giving the street width and
+          flanking wall heights.
+        </p>
+        <p style={para}>
+          An urban-canyon model (Soulhac et al., 2008) then channels that wind: flow along the street is
+          amplified, flow across it attenuated. Arrows are confined to the carriageway and coloured by a
+          cyclist wind-strength scale — tap a street for its head/tailwind impact.
+        </p>
+
+        <div style={section}>Accuracy</div>
+        <p style={para}>
+          The regional input is validated hourly against real observations from DMI stations and
+          Copenhagen Airport (METAR). The per-street values are a physically-motivated model, not a
+          measurement — true street-level wind would need an anemometer on the street.
+        </p>
+
+        <div style={section}>Data &amp; attribution</div>
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: COLORS.dim, lineHeight: 1.7 }}>
+          <li>Roads &amp; buildings: © <a style={link} href="https://openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> (ODbL)</li>
+          <li>Weather: <a style={link} href="https://api.met.no/" target="_blank" rel="noreferrer">MET Norway</a> (CC BY 4.0); validation <a style={link} href="https://www.dmi.dk/" target="_blank" rel="noreferrer">DMI</a></li>
+          <li>Basemap: © <a style={link} href="https://carto.com/attributions" target="_blank" rel="noreferrer">CARTO</a></li>
+          <li>Engine: <a style={link} href="https://maplibre.org/" target="_blank" rel="noreferrer">MapLibre GL</a> · <a style={link} href="https://deck.gl/" target="_blank" rel="noreferrer">deck.gl</a></li>
+        </ul>
+
+        <p style={{ fontSize: 12, color: COLORS.faint, marginTop: 18, marginBottom: 0 }}>
+          Source on <a style={link} href="https://github.com/djboy26/cph-wind" target="_blank" rel="noreferrer">GitHub</a>.
+        </p>
+      </div>
+    </div>
   );
 }

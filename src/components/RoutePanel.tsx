@@ -94,12 +94,12 @@ export default function RoutePanel({
 
   const criterionLabel = RANK_CRITERIA.find((c) => c.key === criterion)?.label ?? "";
   const status =
-    !start ? "Search an address, tap the map, or use GPS to set your start." :
+    !start ? "Search, tap the map, or use GPS for your start." :
     !end ? "Now choose your destination." :
-    building ? "Finding the best routes…" :
+    building ? "Finding routes…" :
     options.length === 0 ? "No route found between those points." :
-    windSimilar ? `${options.length} routes — wind is similar on all (★ = ${criterionLabel}).` :
-    `${options.length} routes ranked by ${criterionLabel} (★ = best).`;
+    windSimilar ? `${options.length} routes · wind similar on all` :
+    `${options.length} routes · ★ best for ${criterionLabel.toLowerCase()}`;
 
   return (
     <div style={{ ...glass, padding: "13px 15px", width: isMobile ? "auto" : 304, maxHeight: isMobile ? "46vh" : "72vh", overflowY: "auto" }}>
@@ -203,11 +203,9 @@ export default function RoutePanel({
                 </span>
                 <span style={{ fontSize: 10.5, color: COLORS.faint, ...NUM }}>{fmtKm(o.metrics.distanceM)}</span>
               </div>
-              {/* Three criteria: time · wind suffered · % into wind */}
-              <div style={{ fontSize: 11, color: COLORS.dim, marginTop: 5, display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, ...NUM }}>
-                <span><span style={{ color: COLORS.faint }}>time </span>{fmtMin(o.metrics.timeS)}</span>
-                <span><span style={{ color: COLORS.faint }}>wind </span><span style={{ color: wind.color, fontWeight: 600 }}>{wind.text}</span></span>
-                <span><span style={{ color: COLORS.faint }}>into wind </span>{Math.round(o.metrics.headwindExposure * 100)}%</span>
+              {/* time · wind suffered · % into wind — one concise line */}
+              <div style={{ fontSize: 11.5, color: COLORS.dim, marginTop: 4, ...NUM }}>
+                {fmtMin(o.metrics.timeS)} · <span style={{ color: wind.color, fontWeight: 600 }}>{wind.text}</span> · {Math.round(o.metrics.headwindExposure * 100)}% into wind
               </div>
             </button>
           );
