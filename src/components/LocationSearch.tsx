@@ -142,7 +142,7 @@ export default function LocationSearch({
 
       {open && (results.length > 0 || error) && (
         <div className="ui-fade thin-scroll" style={{ ...glass, marginTop: 6, padding: 4, maxHeight: 244, overflowY: "auto", borderRadius: RADIUS.md }}>
-          {error && <div style={{ padding: "9px 10px", fontSize: 12, color: COLORS.dim }}>Search unavailable — try again.</div>}
+          {error && <div style={{ padding: "9px 10px", fontSize: 12, color: COLORS.dim }}>Search unavailable. Try again.</div>}
           {results.map((p, i) => (
             <button
               key={p.key}

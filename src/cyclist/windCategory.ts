@@ -35,7 +35,7 @@ export const WIND_BANDS: WindBand[] = [
   { key: "moderate", label: "Moderate", minMs: 4, maxMs: 6, color: [224, 168, 38], blurb: "Noticeable effort into a headwind." },
   { key: "strong", label: "Strong", minMs: 6, maxMs: 9, color: [228, 118, 40], blurb: "Hard work into a headwind; affects pace." },
   { key: "very_strong", label: "Very strong", minMs: 9, maxMs: 12, color: [212, 58, 52], blurb: "Tough; gusts can affect balance." },
-  { key: "severe", label: "Severe", minMs: 12, maxMs: Infinity, color: [158, 46, 104], blurb: "Hazardous — consider avoiding." },
+  { key: "severe", label: "Severe", minMs: 12, maxMs: Infinity, color: [158, 46, 104], blurb: "Hazardous. Best avoided." },
 ];
 
 /** Strength band for a street-level wind speed (m/s). */

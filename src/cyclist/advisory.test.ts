@@ -37,6 +37,12 @@ describe("cyclingAdvisory", () => {
     expect(a?.text).toContain("Rain");
   });
 
+  it("flags a hot day", () => {
+    const a = cyclingAdvisory(wind(3, 4), { tempC: 29, precipMm: 0 });
+    expect(a?.level).toBe("info");
+    expect(a?.text).toContain("Warm");
+  });
+
   it("prioritises ice over gusts", () => {
     const a = cyclingAdvisory(wind(4, 15), { tempC: 1, humidityPct: 95 });
     expect(a?.text.toLowerCase()).toContain("ic");

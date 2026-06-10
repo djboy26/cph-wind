@@ -63,28 +63,26 @@ export default function About({ open, onClose }: { open: boolean; onClose: () =>
         </div>
 
         <p style={{ margin: 0, color: COLORS.text, fontSize: 14.5, lineHeight: 1.5 }}>
-          Live wind along every street in Greater Copenhagen — regional weather combined with each
+          Live wind along every street in Greater Copenhagen. It combines the regional weather with each
           street's building geometry, so you can see where the wind helps or hurts and plan around it.
         </p>
 
         <div style={section}>How the wind is calculated</div>
         <p style={para}>
-          The regional wind (one value, refreshed every 10&nbsp;min) comes from MET Norway's
-          Locationforecast (yr.no). For each street, perpendicular rays from the centreline find the
-          nearest left/right building walls (OpenStreetMap footprints) — giving the street width and
-          flanking wall heights.
+          The regional wind comes from MET Norway (yr.no) and refreshes every 10&nbsp;minutes. For each
+          street we take its width and the height of the buildings on either side, read from OpenStreetMap.
         </p>
         <p style={para}>
-          An urban-canyon model (Soulhac et al., 2008) then channels that wind: flow along the street is
-          amplified, flow across it attenuated. Arrows are confined to the carriageway and coloured by a
-          cyclist wind-strength scale — tap a street for its head/tailwind impact.
+          An urban canyon model (Soulhac et al., 2008) then channels that wind down the street: wind
+          flowing along the street speeds up, wind across it dies down. Arrows stay on the carriageway and
+          are coloured by a cyclist wind scale. Tap a street to see its head or tailwind.
         </p>
 
         <div style={section}>Accuracy</div>
         <p style={para}>
-          The regional input is validated hourly against real observations from DMI stations and
-          Copenhagen Airport (METAR). The per-street values are a physically-motivated model, not a
-          measurement — true street-level wind would need an anemometer on the street.
+          The regional input is checked every hour against real observations from DMI stations and
+          Copenhagen Airport (METAR). The per-street values are a model, not a measurement. True
+          street level wind would need an anemometer on the spot.
         </p>
 
         <div style={section}>Data &amp; attribution</div>

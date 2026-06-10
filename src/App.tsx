@@ -202,7 +202,7 @@ class ErrorBoundary extends Component<{ children: ReactNode; silent?: boolean },
           <h2 style={{ color: "#c00", marginTop: 0 }}>Something broke</h2>
           <p>{this.state.error.message}</p>
           <p style={{ fontSize: 13, color: "#666" }}>
-            Refresh the page to retry. If it keeps happening, the data files may be missing — open the browser console for details.
+            Refresh the page to retry. If it keeps happening, the data files may be missing. Open the browser console for details.
           </p>
           <button
             onClick={() => location.reload()}
