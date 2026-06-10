@@ -4,11 +4,14 @@
 // mobile the live-wind block doubles as the brand so the CTA has room to be labelled.
 
 import type { Wind } from "../math";
+import { feelsLikeC } from "../cyclist/feelsLike";
 import { glass, pill, COLORS, NUM, FONT } from "./ui";
 import { Icon } from "./Icon";
 
 interface Props {
   wind: Wind | null;
+  /** Air temperature for the active hour, °C. */
+  tempC?: number;
   timestamp?: string;
   loading: boolean;
   routingActive: boolean;
@@ -34,24 +37,47 @@ function WindDial({ deg, size = 30 }: { deg: number; size?: number }) {
   );
 }
 
-export default function TopBar({ wind, timestamp, loading, routingActive, onPlanRoute, onAbout, isMobile }: Props) {
+export default function TopBar({ wind, tempC, timestamp, loading, routingActive, onPlanRoute, onAbout, isMobile }: Props) {
   const deg = wind?.directionDeg ?? 0;
+  const timestampLabel = timestamp
+    ? new Date(timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+    : null;
+  // "Feels like" — wind chill on a cold, breezy day. Only worth showing when it
+  // diverges from the air temperature by a degree or more.
+  const feels = tempC != null && wind ? feelsLikeC(tempC, wind.speedMs) : null;
+  const showFeels = tempC != null && feels != null && Math.abs(tempC - feels) >= 1;
 
   // Live wind: identity on desktop (sits beside the brand), and the brand itself on mobile.
   const windBlock = (
-    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
       <span className="live-dot" />
       <WindDial deg={deg} size={isMobile ? 26 : 30} />
-      <div style={{ lineHeight: 1.12 }}>
-        <div style={{ fontSize: isMobile ? 15 : 17, fontWeight: 700, letterSpacing: -0.3, color: COLORS.text, ...NUM }}>
+      <div style={{ lineHeight: 1.2, minWidth: 0 }}>
+        <div style={{ fontSize: isMobile ? 15 : 17, fontWeight: 700, letterSpacing: -0.3, color: COLORS.text, ...NUM, minWidth: 0 }}>
           {loading || !wind ? "—" : wind.speedMs.toFixed(1)}
           <span style={{ fontSize: 10.5, color: COLORS.dim, marginLeft: 3, fontWeight: 500 }}>m/s</span>
         </div>
-        <div style={{ fontSize: 10.5, color: COLORS.faint }}>
-          {wind ? `from ${compassPoint(deg)}` : "loading"}
-          {timestamp && !isMobile && ` · ${new Date(timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`}
+        <div style={{ fontSize: 10.5, color: COLORS.faint, marginTop: 2, display: "flex", flexWrap: "wrap", gap: 4 }}>
+          <span>{wind ? `from ${compassPoint(deg)}` : "loading"}</span>
+          {timestampLabel && <span>· {timestampLabel}</span>}
         </div>
       </div>
+      {tempC != null && (
+        <div
+          style={{
+            paddingLeft: 9,
+            marginLeft: 2,
+            borderLeft: `1px solid ${COLORS.line}`,
+            lineHeight: 1.2,
+            ...NUM,
+          }}
+        >
+          <div style={{ fontSize: isMobile ? 14 : 15.5, fontWeight: 700, color: COLORS.text }}>{Math.round(tempC)}°</div>
+          {showFeels && (
+            <div style={{ fontSize: 10.5, color: COLORS.faint }}>feels {Math.round(feels!)}°</div>
+          )}
+        </div>
+      )}
     </div>
   );
 

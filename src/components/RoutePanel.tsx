@@ -65,10 +65,13 @@ export default function RoutePanel({
       <button
         onClick={onToggle}
         className="lift"
-        style={{ ...glass, display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", fontWeight: 600, fontSize: 14, color: COLORS.text, cursor: "pointer" }}
+        style={{ ...glass, display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", fontWeight: 600, fontSize: 14, color: COLORS.text, cursor: "pointer" }}
       >
         <Icon name="route" size={17} color={COLORS.accent} />
-        Plan a route
+        <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, minWidth: 0 }}>
+          <span>Plan a route</span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: COLORS.dim }}>Search, tap the map, or use GPS</span>
+        </span>
       </button>
     );
   }
@@ -81,6 +84,13 @@ export default function RoutePanel({
   // Routes between fixed points can't escape the net wind — flag when they're close.
   const exposures = options.map((o) => o.metrics.headwindExposure);
   const windSimilar = options.length > 1 && Math.max(...exposures) - Math.min(...exposures) < 0.06;
+
+  // Commute view: the wind you get going out reverses on the way back, so a tailwind
+  // now becomes a headwind later. Show both for the highlighted route.
+  const selected = options.find((o) => o.id === selectedId) ?? options.find((o) => o.id === bestId) ?? options[0];
+  const roundTrip = selected
+    ? { out: windSuffered(selected.metrics.avgHeadwindMs), back: windSuffered(-selected.metrics.avgHeadwindMs) }
+    : null;
 
   const criterionLabel = RANK_CRITERIA.find((c) => c.key === criterion)?.label ?? "";
   const status =
@@ -203,6 +213,16 @@ export default function RoutePanel({
           );
         })}
       </div>
+
+      {roundTrip && (
+        <div style={{ marginTop: 11, paddingTop: 10, borderTop: `1px solid ${COLORS.hairline}` }}>
+          <div style={{ ...label, marginBottom: 5 }}>Round trip</div>
+          <div style={{ display: "flex", gap: 16, fontSize: 11.5, color: COLORS.dim, ...NUM }}>
+            <span><span style={{ color: COLORS.faint }}>out </span><span style={{ color: roundTrip.out.color, fontWeight: 600 }}>{roundTrip.out.text}</span></span>
+            <span><span style={{ color: COLORS.faint }}>back </span><span style={{ color: roundTrip.back.color, fontWeight: 600 }}>{roundTrip.back.text}</span></span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

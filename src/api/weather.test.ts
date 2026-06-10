@@ -34,10 +34,10 @@ describe('fetchCurrentWind', () => {
   });
 
   it('parses MET Norway response into Wind shape', async () => {
-    (globalThis.fetch as any).mockResolvedValue({
+    vi.mocked(globalThis.fetch).mockResolvedValue({
       ok: true,
       json: async () => MOCK_RESPONSE,
-    });
+    } as Response);
 
     const result = await fetchCurrentWind(55.68, 12.56);
 
@@ -51,34 +51,34 @@ describe('fetchCurrentWind', () => {
   });
 
   it('throws on non-OK HTTP response', async () => {
-    (globalThis.fetch as any).mockResolvedValue({
+    vi.mocked(globalThis.fetch).mockResolvedValue({
       ok: false,
       status: 503,
       text: async () => 'Service Unavailable',
-    });
+    } as Response);
 
     await expect(fetchCurrentWind(55.68, 12.56)).rejects.toThrow(/503/);
   });
 
   it('throws when response is missing the timeseries', async () => {
-    (globalThis.fetch as any).mockResolvedValue({
+    vi.mocked(globalThis.fetch).mockResolvedValue({
       ok: true,
       json: async () => ({ type: 'Feature', properties: {} }),
-    });
+    } as Response);
 
     await expect(fetchCurrentWind(55.68, 12.56)).rejects.toThrow(/timeseries/);
   });
 
-  it('builds the correct MET Norway URL', async () => {
-    (globalThis.fetch as any).mockResolvedValue({
+  it('calls the /api/wind proxy with rounded coordinates', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue({
       ok: true,
       json: async () => MOCK_RESPONSE,
-    });
+    } as Response);
 
     await fetchCurrentWind(55.68, 12.56);
 
-    const callUrl = (globalThis.fetch as any).mock.calls[0][0];
-    expect(callUrl).toContain('api.met.no');
+    const callUrl = vi.mocked(globalThis.fetch).mock.calls[0][0];
+    expect(callUrl).toContain('/api/wind');
     expect(callUrl).toContain('lat=55.6800');
     expect(callUrl).toContain('lon=12.5600');
   });

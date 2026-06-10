@@ -33,11 +33,15 @@ export default function OnboardingHint({ isMobile }: { isMobile: boolean }) {
       style={{
         ...glass,
         position: "absolute",
-        bottom: isMobile ? 84 : 22,
-        left: "50%",
-        transform: "translateX(-50%)",
+        // Centred on screen via inset+auto margins (no transform, so it neither fights
+        // the ui-up animation nor depends on the bottom panels' sizes — it simply can't
+        // overlap them). One-time, dismissed with "Got it".
+        inset: 0,
+        margin: "auto",
+        width: "fit-content",
+        height: "fit-content",
         zIndex: 40,
-        padding: isMobile ? "10px 12px" : "12px 16px",
+        padding: isMobile ? "12px 14px" : "12px 16px",
         display: "flex",
         flexDirection: isMobile ? "column" : "row",
         alignItems: isMobile ? "stretch" : "center",
