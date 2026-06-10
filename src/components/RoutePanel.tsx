@@ -101,8 +101,10 @@ export default function RoutePanel({
     windSimilar ? `${options.length} routes · wind similar on all` :
     `${options.length} routes · ★ best for ${criterionLabel.toLowerCase()}`;
 
+  // Desktop: cap height so the panel (anchored at top:78) never reaches the
+  // forecast strip docked bottom-left; it scrolls internally instead.
   return (
-    <div style={{ ...glass, padding: "13px 15px", width: isMobile ? "auto" : 304, maxHeight: isMobile ? "46vh" : "72vh", overflowY: "auto" }}>
+    <div style={{ ...glass, padding: "13px 15px", width: isMobile ? "auto" : 304, maxHeight: isMobile ? "46vh" : "calc(100vh - 210px)", overflowY: "auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: -0.2 }}>Plan a route</span>
         <button
