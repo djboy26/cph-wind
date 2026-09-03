@@ -54,12 +54,23 @@ npm run data:validate
 
 Generated artefacts in `public/data/` are committed. `segtiles/` is the tiled form the app loads.
 
-## Shell working directory
+## Do not start a dev server, and do not try to render the app
 
-Start every session with `cd` into this repo and stay there. Tooling that resolves config from the
-shell's cwd — the browser preview launcher in particular, which reads `launch.json` — will otherwise
-pick up whatever unrelated project the shell happens to be sitting in. This has already happened
-once and started a different project's dev server.
+You cannot see this app and you do not need to. **Verification is a Vercel branch preview.** Commit,
+push the branch, and stop — Vercel builds it and a human takes the screenshots. That has been the
+loop for every step in `PLAN.md` and it works.
+
+Two reasons not to fight this:
+
+- The harness resets the shell's working directory after every command, so `cd` does not persist.
+  The browser preview launcher resolves `launch.json` from wherever the shell lands, which is not
+  this repo. It has already started an unrelated project's dev server once.
+- A local render would only tell you the component mounts. `npm run build` already tells you that.
+  What a screenshot is *for* is judging a layout, and that judgement is not yours to make alone.
+
+So: build, lint, test, commit, push. Say plainly in your report that the visual states are
+unverified and list which ones need eyes. Never write into another project's config to work around
+this.
 
 ## Working style
 

@@ -761,6 +761,30 @@ test the null case.
 `npm run check` and `npm run build`. Then the same three screenshots step 4 asked for, which have
 not been taken yet.
 
+### Completed 2026-09-03 — commits `434b1de` (step 4) and `aae4d0c` (step 4b)
+
+Branch `feat/route-panel-redesign`, rebased onto the bot's `cfea00e`. **116 tests** green (was 97).
+Lint and build clean. Copy decisions live in `routeCopy.ts` — `formatWindDelta`, `verdictFor`,
+`forecastNote` — with 19 tests between them covering every string in this spec.
+
+Both step 4b spec errors were mine and were flagged rather than worked around: waypoint measurements
+taken from a mockup where those rows displayed chosen waypoints rather than being inputs, and the
+accent spent on rank when order already carries rank.
+
+**Verification method, settled:** push the branch, screenshot the Vercel preview. No local dev
+server. Four steps were spent trying to render locally before anyone said this out loud —
+`CLAUDE.md` now says it.
+
+**Still unverified visually** — three states, and they are the only open item on step 4:
+
+1. no route yet (panel says nothing)
+2. `windIsSimilar === true` — the calm-day verdict
+3. wind discriminating — the "go round" verdict
+
+Watch specifically for the two things the spec got wrong once already: whether the underlined
+waypoint rows read as tappable fields, and whether the accent on the selected row is visible enough
+to serve as selection state.
+
 ---
 
 ## Step 5 — Map legibility and honesty
