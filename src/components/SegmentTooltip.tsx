@@ -1,6 +1,6 @@
 // src/components/SegmentTooltip.tsx
 import type { GeometrySource } from "../math";
-import { windBand, streetImpact, type RGB } from "../cyclist/windCategory";
+import { windBand, shelterRatio, streetImpact, type RGB } from "../cyclist/windCategory";
 import { glass, COLORS, NUM } from "./ui";
 
 interface Props {
@@ -8,6 +8,8 @@ interface Props {
   y: number;
   streetName: string | null;
   modifiedSpeedMs: number;
+  /** Ambient (10 m) wind for the selected hour, m/s — the shelter reference. */
+  ambientSpeedMs: number;
   /** Canyon-scaled gust speed on the street, m/s (undefined if none reported). */
   gustMs?: number;
   travelDeg: number;
@@ -49,13 +51,16 @@ const SOURCE_LABELS: Record<GeometrySource, string> = {
 };
 
 export default function SegmentTooltip({
-  x, y, streetName, modifiedSpeedMs, gustMs, travelDeg, bearingDeg, canyonH, canyonW,
+  x, y, streetName, modifiedSpeedMs, ambientSpeedMs, gustMs, travelDeg, bearingDeg, canyonH, canyonW,
   leftHeightM, rightHeightM, geometrySource, laneIndex, laneCount,
   variant, onClose,
 }: Props) {
   // Only call it a gust when it meaningfully exceeds the mean (≥10% and ≥1 m/s over).
   const showGust = gustMs != null && gustMs >= modifiedSpeedMs * 1.1 && gustMs - modifiedSpeedMs >= 1;
-  const strength = windBand(modifiedSpeedMs);
+  // The map colours by shelter, so the tooltip must name the same band — but it is
+  // also the one place absolute strength belongs, so it prints both.
+  const ratio = shelterRatio(modifiedSpeedMs, ambientSpeedMs);
+  const strength = windBand(ratio);
   const impact = streetImpact(modifiedSpeedMs, travelDeg, bearingDeg);
   const lambda = canyonW > 0 ? canyonH / canyonW : 0;
   const regime =
@@ -109,9 +114,15 @@ export default function SegmentTooltip({
       )}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
         <span style={{ color: COLORS.dim }}>Wind on street</span>
+        <span style={{ fontWeight: 600 }}>{modifiedSpeedMs.toFixed(1)} m/s</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+        <span style={{ color: COLORS.dim }}>Shelter</span>
         <span>
-          <span style={{ fontWeight: 600 }}>{modifiedSpeedMs.toFixed(1)} m/s</span>
-          <span style={{ marginLeft: 6 }}><Chip color={strength.color} label={strength.label} /></span>
+          <span style={{ color: COLORS.dim, marginRight: 6 }}>
+            {Math.round(ratio * 100)}% of {ambientSpeedMs.toFixed(1)}
+          </span>
+          <Chip color={strength.color} label={strength.label} />
         </span>
       </div>
       {showGust && (

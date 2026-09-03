@@ -846,7 +846,7 @@ function MapApp() {
 
       {windResult && !stillLoading && !(routing && isMobile) && (
         <div style={legendStyle}>
-          <Legend isMobile={isMobile} />
+          <Legend isMobile={isMobile} ambientSpeedMs={activeWind?.speedMs ?? 0} />
         </div>
       )}
 
@@ -872,6 +872,7 @@ function MapApp() {
           y={activeTip.y}
           streetName={wayNames.get(String(activeTip.arrow.wayId)) ?? null}
           modifiedSpeedMs={activeTip.arrow.speedMs}
+          ambientSpeedMs={activeWind?.speedMs ?? 0}
           gustMs={activeTip.arrow.gustMs}
           travelDeg={activeTip.arrow.flowDeg}
           bearingDeg={activeTip.arrow.bearingDeg}

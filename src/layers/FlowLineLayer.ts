@@ -14,7 +14,7 @@ import {
   type SegmentInput,
   type Wind,
 } from '../math';
-import { windBandColor } from '../cyclist/windCategory';
+import { windBandColor, shelterRatio } from '../cyclist/windCategory';
 import type { RawSegment } from './buildWindArrows';
 
 const DEG = Math.PI / 180;
@@ -96,7 +96,8 @@ export function buildFlowField(segments: RawSegment[], wind: Wind): FlowLine[] {
   for (const raw of segments) {
     const seg = normalize(raw);
     const cw = computeSegmentCenterWind(seg, wind); // { speedMs, flowDeg, gustMs }
-    const color = windBandColor(cw.speedMs);
+    // Colour is shelter (street / ambient), not absolute speed — see windCategory.
+    const color = windBandColor(shelterRatio(cw.speedMs, wind.speedMs));
     const sizeM = sizeForSpeed(cw.speedMs);
     // Spread the arrows along the street centerline, each within its own slot.
     const spread = Math.min(seg.segmentLengthM, SPREAD_MAX_M);

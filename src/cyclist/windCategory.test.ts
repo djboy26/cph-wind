@@ -5,49 +5,91 @@ import {
   ROUTE_IMPACTS,
   windBand,
   windBandColor,
+  shelterRatio,
+  OPEN_STREET_RATIO,
   routeImpact,
   streetImpact,
   type RGB,
 } from "./windCategory";
-import { canyonModifiedWind } from "../math";
+import { computeSegmentCenterWind, type SegmentInput, type GeometrySource } from "../math";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
-describe("windBand (strength)", () => {
+describe("windBand (shelter ratio)", () => {
   it("bands are contiguous and cover 0..∞", () => {
-    expect(WIND_BANDS[0].minMs).toBe(0);
+    expect(WIND_BANDS[0].minRatio).toBe(0);
     for (let i = 1; i < WIND_BANDS.length; i++) {
-      expect(WIND_BANDS[i].minMs).toBe(WIND_BANDS[i - 1].maxMs);
+      expect(WIND_BANDS[i].minRatio).toBe(WIND_BANDS[i - 1].maxRatio);
     }
-    expect(WIND_BANDS[WIND_BANDS.length - 1].maxMs).toBe(Infinity);
+    expect(WIND_BANDS[WIND_BANDS.length - 1].maxRatio).toBe(Infinity);
   });
 
-  // Thresholds are now 1.2 / 2.4 / 3.6 / 5 / 7, rider-height metres per second.
-  // The pre-step-2a calibration was 2 / 4 / 6 / 9 / 12, set against unreduced 10 m
-  // met wind; step 2a put the boundary-layer reduction inside canyonModifiedWind(),
-  // which dropped every street reading by ~40% and left that scale with 80% of the
-  // map in two bands and the top two unreachable.
-  it("classifies representative speeds", () => {
-    expect(windBand(0).key).toBe("calm");
-    expect(windBand(1.1).key).toBe("calm");
-    expect(windBand(1.2).key).toBe("light");
-    expect(windBand(2.47).key).toBe("moderate"); // the street-level median
-    expect(windBand(4.95).key).toBe("strong"); //   the street-level p90
-    expect(windBand(5).key).toBe("very_strong");
-    expect(windBand(20).key).toBe("severe");
+  it("the Open band straddles the open-street reference without cutting it", () => {
+    // 0.60 is a point mass — 24.2% of the network sits exactly there — so a cut
+    // landing on it would split one physical situation across two colours.
+    const open = WIND_BANDS.find((b) => b.key === "open")!;
+    expect(open.minRatio).toBeLessThan(OPEN_STREET_RATIO);
+    expect(open.maxRatio).toBeGreaterThan(OPEN_STREET_RATIO);
+    for (const b of WIND_BANDS) {
+      if (b.minRatio !== 0) expect(b.minRatio).not.toBeCloseTo(OPEN_STREET_RATIO, 9);
+    }
+  });
+
+  // Bounds are ratios of the ambient wind, not m/s. The scale before this one used
+  // absolute rider-height speeds (1.2 / 2.4 / 3.6 / 5 / 7), and before that
+  // met-station speeds (2 / 4 / 6 / 9 / 12). Both answered "how windy is it", which
+  // the header already answers; this one answers "which streets are sheltered".
+  it("classifies representative ratios", () => {
+    expect(windBand(0).key).toBe("deeply_sheltered");
+    expect(windBand(0.2).key).toBe("deeply_sheltered");
+    expect(windBand(0.4).key).toBe("sheltered");
+    expect(windBand(0.55).key).toBe("partly_sheltered");
+    expect(windBand(0.6).key).toBe("open"); //     the open-street reference
+    expect(windBand(0.62).key).toBe("channelled");
+    expect(windBand(0.85).key).toBe("strongly_channelled");
   });
 
   it("upper bound is exclusive (boundary goes to the next band)", () => {
-    expect(windBand(2.4).key).toBe("moderate"); // 2.4 starts moderate, not light
-    expect(windBand(3.6).key).toBe("strong");
-    expect(windBand(7).key).toBe("severe");
+    expect(windBand(0.35).key).toBe("sheltered");
+    expect(windBand(0.5).key).toBe("partly_sheltered");
+    expect(windBand(0.605).key).toBe("channelled");
+    expect(windBand(0.66).key).toBe("strongly_channelled");
   });
 
-  it("clamps negative / non-finite to calm", () => {
-    expect(windBand(-3).key).toBe("calm");
-    expect(windBand(NaN).key).toBe("calm");
+  it("clamps a negative ratio down and falls back to open when it is not a number", () => {
+    expect(windBand(-3).key).toBe("deeply_sheltered");
+    // A missing ratio means "we could not tell", which is the open reference — not
+    // "deeply sheltered", which would paint unknown streets as the calmest thing there is.
+    expect(windBand(NaN).key).toBe("open");
   });
 
   it("color comes from the matching band", () => {
-    expect(windBandColor(2.9)).toEqual(WIND_BANDS.find((b) => b.key === "moderate")!.color);
+    expect(windBandColor(0.55)).toEqual(WIND_BANDS.find((b) => b.key === "partly_sheltered")!.color);
+  });
+});
+
+describe("shelterRatio", () => {
+  it("is scale invariant — the same geometry reads the same on a calm and a wild day", () => {
+    // This is the whole point of the change: colour must not drift with the weather.
+    expect(windBand(shelterRatio(2.64, 4.4)).key).toBe(windBand(shelterRatio(6.0, 10.0)).key);
+    expect(shelterRatio(2.64, 4.4)).toBeCloseTo(0.6, 9);
+    expect(shelterRatio(6.0, 10.0)).toBeCloseTo(0.6, 9);
+  });
+
+  it("puts an open street in the Open band at every ambient", () => {
+    for (let a = 1; a <= 15; a++) {
+      const r = shelterRatio(OPEN_STREET_RATIO * a, a);
+      expect(r, `ambient ${a} gave ratio ${r}`).toBeCloseTo(OPEN_STREET_RATIO, 9);
+      expect(windBand(r).key, `ambient ${a}`).toBe("open");
+    }
+  });
+
+  it("does not divide by a near-calm ambient", () => {
+    expect(() => shelterRatio(0, 0)).not.toThrow();
+    expect(shelterRatio(0, 0)).toBe(OPEN_STREET_RATIO);
+    expect(shelterRatio(0.05, 0.05)).toBe(OPEN_STREET_RATIO); // below the 0.1 guard
+    expect(shelterRatio(1, NaN)).toBe(OPEN_STREET_RATIO);
+    expect(Number.isFinite(shelterRatio(3, 0.0001))).toBe(true);
   });
 });
 
@@ -99,66 +141,75 @@ describe("streetImpact (decompose onto street axis)", () => {
 // dead if one band swallows everything or a band never lights up.
 // ---------------------------------------------------------------------------
 
-describe("band occupancy over Copenhagen's wind climate", () => {
-  // Copenhagen's 10 m wind is well described by Weibull(k = 2, c = 6.1), annual
-  // mean ~5.4 m/s. Sampled over a median-λ street (H/W = 6.8/20 = 0.34) with
-  // orientation uniform, which is what the map actually shows.
-  function occupancy(n = 120_000) {
-    let seed = 0x1f2e3d4c;
-    const rand = () => {
-      seed = (seed + 0x6d2b79f5) | 0;
-      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-    const canyon = { heightM: 6.8, widthM: 20 };
+// Real segment geometry, straight off the tiles the app ships and loads. The previous
+// scale was calibrated against a modelled wind climate and died on contact with the
+// data, so this one is pinned to the data instead.
+const GEOM_SRC: GeometrySource[] = ["measured", "partial", "fallback"];
+type SegTuple = [number, number, number, number, number, number, number, number, number, string | number | null];
+
+function loadShippedSegments(): SegmentInput[] {
+  const dir = join(process.cwd(), "public", "data", "segtiles");
+  const out: SegmentInput[] = [];
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith(".json") || file === "index.json") continue;
+    const tuples = JSON.parse(readFileSync(join(dir, file), "utf8")) as SegTuple[];
+    for (const [lon, lat, bearingDeg, segLen, leftDist, rightDist, leftH, rightH, geomSrc] of tuples) {
+      const widthM = leftDist + rightDist;
+      out.push({
+        lon, lat, bearingDeg, segmentLengthM: segLen, widthM,
+        leftDistM: leftDist, rightDistM: rightDist,
+        leftHeightM: leftH, rightHeightM: rightH,
+        canyonH: (leftH + rightH) / 2, canyonW: widthM,
+        laneOffsetsM: [0, 0, 0, 0, 0],
+        geometrySource: GEOM_SRC[geomSrc] ?? "fallback",
+      });
+    }
+  }
+  return out;
+}
+
+describe("band occupancy on the shipped network", () => {
+  const segments = loadShippedSegments();
+  const AMBIENT = 5; // any value: the ratio distribution does not depend on it
+  const DIRECTIONS = Array.from({ length: 24 }, (_, i) => i * 15);
+
+  function occupancy(ambient: number) {
     const counts = new Map<string, number>(WIND_BANDS.map((b) => [b.key, 0]));
-    for (let i = 0; i < n; i++) {
-      // Weibull(k, c) by inverse CDF: c * (-ln U)^(1/k).
-      const ambient = 6.1 * Math.pow(-Math.log(1 - rand()), 1 / 2);
-      const street = rand() * 360;
-      const dir = rand() * 360;
-      const w = canyonModifiedWind(street, canyon, { speedMs: ambient, directionDeg: dir });
-      const k = windBand(w.speedMs).key;
-      counts.set(k, counts.get(k)! + 1);
+    let n = 0;
+    for (const directionDeg of DIRECTIONS) {
+      for (const seg of segments) {
+        const w = computeSegmentCenterWind(seg, { speedMs: ambient, directionDeg });
+        const k = windBand(shelterRatio(w.speedMs, ambient)).key;
+        counts.set(k, counts.get(k)! + 1);
+        n++;
+      }
     }
     return new Map([...counts].map(([k, v]) => [k, (100 * v) / n]));
   }
 
-  it("puts no band below 1% or above 40% of the map", () => {
-    const occ = occupancy();
+  it("reads real tiles, not a synthetic distribution", () => {
+    expect(segments.length).toBeGreaterThan(50_000);
+  });
+
+  it("puts no band below 4% or above 35% of the map", () => {
+    const occ = occupancy(AMBIENT);
     const report = WIND_BANDS.map((b) => `${b.label} ${occ.get(b.key)!.toFixed(1)}%`).join(", ");
     for (const b of WIND_BANDS) {
       const share = occ.get(b.key)!;
-      expect(share, `${b.label} holds ${share.toFixed(1)}% — ${report}`).toBeGreaterThanOrEqual(1);
-      expect(share, `${b.label} holds ${share.toFixed(1)}% — ${report}`).toBeLessThanOrEqual(40);
+      expect(share, `${b.label} holds ${share.toFixed(1)}% — ${report}`).toBeGreaterThanOrEqual(4);
+      expect(share, `${b.label} holds ${share.toFixed(1)}% — ${report}`).toBeLessThanOrEqual(35);
     }
-    // Shares must sum to 100 — proves every sample landed in exactly one band.
-    const total = [...occ.values()].reduce((a, b) => a + b, 0);
-    expect(total).toBeCloseTo(100, 6);
+    expect([...occ.values()].reduce((a, b) => a + b, 0)).toBeCloseTo(100, 6);
   });
 
-  it("the pre-step-2a thresholds would fail the same test", () => {
-    // 2 / 4 / 6 / 9 / 12 against post-step-2a street wind: the top bands go dark.
-    const OLD = [2, 4, 6, 9, 12, Infinity];
-    let seed = 0x1f2e3d4c;
-    const rand = () => {
-      seed = (seed + 0x6d2b79f5) | 0;
-      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-    const canyon = { heightM: 6.8, widthM: 20 };
-    const n = 120_000;
-    const counts = new Array(OLD.length).fill(0);
-    for (let i = 0; i < n; i++) {
-      const ambient = 6.1 * Math.pow(-Math.log(1 - rand()), 1 / 2);
-      const w = canyonModifiedWind(rand() * 360, canyon, { speedMs: ambient, directionDeg: rand() * 360 });
-      counts[OLD.findIndex((t) => w.speedMs < t)]++;
+  it("gives the same picture whatever the wind is doing", () => {
+    // Geometry fixes the ratio, so a 2 m/s day and an 11 m/s day colour identically.
+    // An absolute scale could not do this — it was the reason the old one showed
+    // two colours at the live wind.
+    const calm = occupancy(2), wild = occupancy(11);
+    for (const b of WIND_BANDS) {
+      expect(calm.get(b.key)!, b.label).toBeCloseTo(wild.get(b.key)!, 6);
     }
-    const shares = counts.map((c) => (100 * c) / n);
-    expect(Math.max(...shares)).toBeGreaterThan(40); // one band swallows the map
-    expect(Math.min(...shares)).toBeLessThan(1); //    and the top ones never light up
   });
 });
 

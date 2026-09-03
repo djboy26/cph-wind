@@ -1,15 +1,19 @@
 // src/components/Legend.tsx
-// Collapsible cyclist wind-strength legend.
+// Collapsible cyclist shelter legend. The arrow colours are a ratio of today's wind,
+// so the reference ambient has to be on screen or the scale says nothing.
 
 import { useState } from "react";
 import { WIND_BANDS } from "../cyclist/windCategory";
 import { glass, pill, COLORS, NUM, label } from "./ui";
 
-function rangeLabel(minMs: number, maxMs: number): string {
-  return maxMs === Infinity ? `${minMs}+` : `${minMs}–${maxMs}`;
+// Ratios read better as a percentage of the open-air wind; the heading carries the m/s.
+function rangeLabel(minRatio: number, maxRatio: number): string {
+  const pct = (r: number) => Math.round(r * 100);
+  if (maxRatio === Infinity) return `${pct(minRatio)}%+`;
+  return `${pct(minRatio)}–${pct(maxRatio)}%`;
 }
 
-export default function Legend({ isMobile }: { isMobile: boolean }) {
+export default function Legend({ isMobile, ambientSpeedMs }: { isMobile: boolean; ambientSpeedMs: number }) {
   const [open, setOpen] = useState(!isMobile);
 
   if (!open) {
@@ -32,7 +36,7 @@ export default function Legend({ isMobile }: { isMobile: boolean }) {
   return (
     <div className="ui-up" style={{ ...glass, padding: "11px 15px", minWidth: 232 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}>
-        <span style={label}>Wind on street (m/s)</span>
+        <span style={label}>Shelter · relative to {ambientSpeedMs.toFixed(1)} m/s now</span>
         <button
           onClick={() => setOpen(false)}
           aria-label="Collapse legend"
@@ -49,14 +53,15 @@ export default function Legend({ isMobile }: { isMobile: boolean }) {
                 boxShadow: "0 0 0 1px rgba(28,39,51,0.12)",
               }}
             />
-            <span style={{ fontSize: 11.5, fontWeight: 600, width: 74, color: COLORS.text }}>{b.label}</span>
-            <span style={{ fontSize: 11, color: COLORS.dim, width: 36, textAlign: "right", ...NUM }}>{rangeLabel(b.minMs, b.maxMs)}</span>
+            <span style={{ fontSize: 11.5, fontWeight: 600, width: 104, color: COLORS.text }}>{b.label}</span>
+            <span style={{ fontSize: 11, color: COLORS.dim, width: 52, textAlign: "right", ...NUM }}>{rangeLabel(b.minRatio, b.maxRatio)}</span>
             <span style={{ fontSize: 10, color: COLORS.faint }}>{b.blurb}</span>
           </div>
         ))}
       </div>
       <div style={{ fontSize: 10, color: COLORS.faint, marginTop: 9, lineHeight: 1.35 }}>
-        Color = wind strength along the street. Click a street for headwind / tailwind impact.
+        Color = how much of today's wind reaches the street. Click a street for its speed in
+        m/s and headwind / tailwind impact.
       </div>
     </div>
   );

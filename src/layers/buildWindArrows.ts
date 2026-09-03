@@ -9,7 +9,7 @@
 // The carriageway width is derived from the OSM highway class, NOT the canyon
 // (building-to-building) width — that distinction is what keeps arrows on the road.
 
-import { windBandColor } from '../cyclist/windCategory';
+import { windBandColor, shelterRatio } from '../cyclist/windCategory';
 import {
   computeSegmentCenterWind,
   type GeometrySource,
@@ -125,7 +125,8 @@ export function buildWindArrows(
 
     // One local wind vector for the whole segment (3D-canyon-modified).
     const lane = computeSegmentCenterWind(seg, wind);
-    const [cr, cg, cb] = windBandColor(lane.speedMs);
+    // Colour is shelter (street / ambient), not absolute speed — see windCategory.
+    const [cr, cg, cb] = windBandColor(shelterRatio(lane.speedMs, wind.speedMs));
     const speedFactor = clamp(lane.speedMs / SPEED_REF, MIN_SPEED_FACTOR, MAX_SPEED_FACTOR);
     // Gust amplitude (gust/mean − 1) drives the surge animation; 0 ⇒ steady flow.
     const gustBoost =
