@@ -835,6 +835,40 @@ Also fix the stale comment above `ROUTE_IMPACTS` while in `windCategory.ts`: it 
 matches `ui.ts` "so the panel and the map agree on what a headwind looks like", which 3b deliberately
 reversed.
 
+
+### Completed 2026-09-03 — commit `c5436b1`
+
+Branch `fix/map-legibility`, branched from `main` and rebased onto the bot's `818b0aa`. **116 tests**
+green, lint and build clean. `sizeForSpeed()` is now `clamp(3.2 + 1.5·v, 4, 14)` and reproduces the
+"proposed size" column above exactly. The dual encoding is written down in `FlowLineLayer.ts`.
+`SegmentTooltip` carries the `fallback` caveat.
+
+**Item 4 was already done.** The stale `ROUTE_IMPACTS` comment was removed in step 3c, so that part
+of this spec described a state that no longer existed — the third time in this milestone that a spec
+has been written against a stale reading of the code. The commit only re-wrapped a ragged line there;
+no wording changed.
+
+**Decimation: reported, not touched, as instructed.** Two mechanisms exist and neither is a bug for
+this step:
+
+- `arrowDensityForZoom` hides arrows below zoom 13, draws one per street from 13–16, and multiple
+  above 16.
+- A separate viewport cap — 650 streets on mobile, 1700 on desktop — takes every *n*th street from
+  the visible set.
+
+Two consequences worth deciding on: the cap is a fixed street count regardless of zoom, so visual
+density changes with zoom for reasons unrelated to wind; and the stride is index-based over tile
+order rather than geographic, so which streets survive is arbitrary. Bigger arrows at the same
+density will read as more crowded, so these belong with the sizing second pass, not separately.
+
+**Still unverified visually** — nothing on the map has been seen:
+
+1. arrow size at zoom 13, 16 and 17
+2. whether the six indigo bands are separable at those sizes
+3. the `fallback` caveat line in the tooltip
+
+The size range stays a first guess until (1) and (2) are answered.
+
 ---
 
 ## Step 6 — Bike-type picker
