@@ -566,6 +566,45 @@ The map should show four to six distinct indigo shades in one view at any wind s
 pattern should be legible as structure: sheltered courtyard streets pale, wind-aligned arterials
 dark. Screenshot before and after at the same Nørrebro view.
 
+### Completed 2026-09-03 — commit `94f2744`
+
+Cuts `0.35 / 0.50 / 0.595 / 0.605 / 0.66`. Occupancy on the real shipped network
+9.7 / 21.7 / 17.7 / 26.6 / 15.4 / 9.0. 97 tests green (was 92). Build clean.
+`ROUTE_IMPACTS`, `ui.ts`, `src/math/` and `src/routing/` untouched.
+
+**Two corrections to this spec, both mine.**
+
+1. **The "5,110-segment central network" it was calibrated against does not exist.** That was six
+   tiles I happened to have staged, not a repo artefact. The shipped network is 59,750 segments and
+   nothing defines "central". Dense inner-city tiles carry more canyons than the suburbs, so the
+   subsample understated the no-canyon population: **16.2% at exactly 0.600 in my six tiles against
+   24.2% across the real network**. My cuts consequently put Open at 37.8%, over this spec's own
+   35% gate. The agent measured it, refused to guess, and escalated. Correct call.
+   **Calibrate against every shipped tile, never a convenience sample.**
+
+2. **There were four consumers, not three.** `layers/FlowLineLayer.ts:100` also colours by band and
+   was missing from the table above. A ratio and a speed are both `number`, so TypeScript would
+   have accepted the mistake in silence and every flow line above 0.7 m/s would have drawn as
+   "strongly channelled" — plausible-looking and wrong. Both layers now pass a ratio.
+
+### Follow-on for step 4 — the "Open" band is telling two stories
+
+Measured on the shipped tiles, of everything landing in the Open band (λ < 0.1):
+
+| geometrySource | share of the Open band |
+|---|---|
+| `measured` | 0.7% |
+| `partial` | 6.4% |
+| **`fallback`** | **92.9%** |
+
+`fallback` means the perpendicular ray-cast found no building and the 25 m centroid guess was used.
+So "Open · about the open-air wind at street level" currently means both *this street genuinely has
+no canyon* and *we could not measure this street*, across roughly a quarter of the map.
+
+`geometrySource` is already on every segment and already reaches `SegmentTooltip`. Either split the
+band, or have the tooltip say plainly when the geometry was guessed. This was invisible while the
+scale was absolute; the shelter framing surfaced it.
+
 ---
 
 ## Step 4 — Rebuild `RoutePanel.tsx`
