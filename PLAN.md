@@ -443,6 +443,34 @@ adjacent WIND_BANDS dE >= 7
 
 Pin these as tests. They are the gates the first pass missed, and they are cheap to check.
 
+### Completed 2026-09-03 — commits `2c73ef3` (step 3) and `393ee24` (step 3b)
+
+Thresholds 1.2 / 2.4 / 3.6 / 5.0 / 7.0. Map ramp indigo, panel scale diverging teal ↔ rust.
+`npm run check` green: **92 tests** (was 81 before step 3). All four gates pinned as tests with
+WCAG contrast and OKLab ΔE implemented in the test file, no outside tooling.
+
+Both gates confirmed failing on the rust ramp before the change: Calm 2.13:1, and map Moderate vs
+panel Headwind ΔE 0.8.
+
+Independently re-verified under Viénot deuteranope simulation — the number that actually matters for
+a sequential ramp is whether lightness order survives, not adjacent ΔE:
+
+| ramp | deutan adjacent ΔE | lightness monotonic under deutan | L span |
+|---|---|---|---|
+| rust | min 8.3 | yes | 0.415 |
+| **indigo (shipped)** | min 7.7 | **yes** | 0.382 |
+
+Indigo gives up 8% of lightness span and buys 48% of the map clearing the 3:1 visibility floor plus
+the removal of the magnitude/direction colour collision. Correct trade.
+
+**Root cause of the step 3 defects, worth remembering:** each scale was validated in isolation and
+never measured against the other, or against the surface it lands on. The ΔE ≥ 12 cross-palette gate
+now enforces the first automatically and the 3:1 gate the second.
+
+**Left over for step 4:** the comment above `ROUTE_IMPACTS` still says the scale matches `ui.ts`
+"so the panel and the map agree on what a headwind looks like". After 3b that reads backwards — the
+map now deliberately shares no colours with the panel. One line, fix it when that block is next open.
+
 ---
 
 ## Step 4 — Rebuild `RoutePanel.tsx`
