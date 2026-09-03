@@ -27,6 +27,7 @@ import TimeSlider from "./components/TimeSlider";
 import AdvisoryChip from "./components/Advisory";
 import { cyclingAdvisory } from "./cyclist/advisory";
 import { bestRideWindow } from "./cyclist/bestWindow";
+import type { BestWindow } from "./cyclist/routeCopy";
 import { reportError } from "./monitoring";
 import { Analytics } from "@vercel/analytics/react";
 import { glass, COLORS } from "./components/ui";
@@ -374,10 +375,19 @@ function MapApp() {
   }, [routing, start, end, activeWind]);
 
   // Rank by the rider's chosen criterion; the winner is the highlighted "best".
-  const { sorted: rankedRoutes, bestId } = useMemo(
+  const { sorted: rankedRoutes, bestId, windIsSimilar } = useMemo(
     () => rankRoutes(routeOptions, criterion),
     [routeOptions, criterion],
   );
+
+  // The verdict names the better hour, so it needs a clock label rather than an
+  // index into the forecast.
+  const bestWindow = useMemo<BestWindow | null>(() => {
+    if (!rideWindow) return null;
+    const step = forecast[rideWindow.index];
+    if (!step) return null;
+    return { at: new Date(step.time).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) };
+  }, [rideWindow, forecast]);
 
   const selectedRoute =
     rankedRoutes.find((o) => o.id === selectedRouteId)
@@ -839,6 +849,8 @@ function MapApp() {
             onSelect={setSelectedRouteId}
             criterion={criterion}
             onCriterion={setCriterion}
+            windIsSimilar={windIsSimilar}
+            bestWindow={bestWindow}
             isMobile={isMobile}
           />
         </div>
