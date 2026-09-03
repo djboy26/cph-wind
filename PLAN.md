@@ -143,9 +143,33 @@ bestId === B     // the longer route legitimately wins
 windIsSimilar === false
 ```
 
+### Completed 2026-09-03 — commit `9b3510d`, branch `fix/ranker-objective`
+
+`normaliser()` and `RECOMMENDED_WEIGHTS` deleted. `rankRoutes()` returns `windIsSimilar` and every
+comparator breaks ties on the opposite axis. `windSensitivity` 0.5 with the derivation in a comment.
+`npm run check` green: lint clean, **81 tests** (was 76). `src/math/index.ts` untouched.
+
+Verified independently across wind regimes, not just the pinned case:
+
+| ambient | windDeltaS spread | windIsSimilar | ranks by | winner |
+|---|---|---|---|---|
+| 3.1 m/s (pinned) | 3.5 s | true | distance | B, 1.39 km |
+| 3.9 m/s (live) | 5.1 s | true | distance | B |
+| 7.0 m/s | 16.8 s | false | time | B |
+| 12.0 m/s | 78.2 s | false | time | C, 1.69 km |
+
+The threshold crosses between 3.9 and 7 m/s without changing the answer, and at gale force the
+longer sheltered route legitimately wins. The fix does not collapse to "always shortest".
+
+**Follow-up, not urgent:** `windIsSimilar` is computed from absolute `windDeltaS` seconds, and
+`windDeltaS` scales with route length. Two routes in identical wind but very different lengths read
+as "not similar". Harmless for A→B alternatives, which cluster within ~30% of each other, and the
+`timeS` fallback still ranks correctly when it trips. Add a comment so nobody later reads the flag
+as "the wind is the same on these routes".
+
 ---
 
-## Step 2 — Unify the wind model (the map and the router disagree)
+## Step 2a — Apply the boundary layer inside the canyon model
 
 **File:** `src/math/index.ts`, then `src/routing/windRoute.ts`
 
@@ -178,32 +202,78 @@ component *less reduced* than the cross component; it does not lift it above fre
 2. **Make sure it is applied exactly once.** `resistance()` and `alongStreetWind()` already call it.
    If routing moves onto the canyon path (below), remove the double application or the wind gets
    reduced to 0.36 ×. Add a comment naming the single point of application.
-3. **Route on the canyon-modified wind.** `edgeHeadwind()` currently calls `resistance()`, which
-   ignores building geometry entirely. It should use the segment's cross-section.
-   **First check whether `Edge` in `routing/graph.ts` carries the cross-section fields.** If it does
-   not, join them from the segment data at graph-build time rather than re-ray-casting at runtime.
-   Report back before doing this if the join is not straightforward.
+3. **Do not touch routing in this step.** Making the router use canyon geometry is step 2b and it is
+   a data-join problem, not a physics problem. See below.
 
-### Acceptance test
+### Why this one line is most of the fix
 
-The single assertion that matters:
+| | arrows | router | gap |
+|---|---|---|---|
+| now | 1.102 × ambient | 0.600 × ambient | **1.84 ×** |
+| after 2a | 0.661 × ambient | 0.600 × ambient | **1.10 ×** |
 
-```
-for a sample of >=500 real segments from public/data/segtiles, and several wind directions:
-  speed drawn by computeSegmentCenterWind(seg, wind)
-    ===  speed used by edgeHeadwind for the same segment and wind      (within 1e-9)
-```
+At the measured median λ = 0.34. Moving `streetLevelWind()` inside `canyonModifiedWind()` closes
+roughly 90% of the disagreement and removes the super-ambient wind entirely, without touching the
+routing graph. Deep canyons (λ = 1.5) go from a 2.42 × gap to 1.45 ×.
 
-Plus:
+### Acceptance tests
 
 ```
-for every lambda in [0, 0.34, 0.65, 1.0, 1.5, 2.5] and any wind:
-  canyonModifiedWind(...).speedMs  <=  ambientWind.speedMs      // never manufactures energy
+for every lambda in [0, 0.1, 0.34, 0.65, 1.0, 1.5, 2.5] and wind from 0..350 deg step 10:
+  canyonModifiedWind(bearing, {H, W}, ambient).speedMs  <=  ambient.speedMs
+      // the model must never manufacture energy. This currently FAILS for
+      // aligned streets at every lambda > 0.
+
+for lambda < 0.1:
+  canyonModifiedWind returns the boundary-layer-reduced wind, NOT the raw ambient.
+      // the early return at the top of the function must also be reduced,
+      // or 16% of central segments keep the old behaviour
+
+streetLevelWind is called exactly once per code path:
+  grep the file — it must appear in canyonModifiedWind, resistance and
+  alongStreetWind, and those must not compose. resistance() does not call
+  canyonModifiedWind today, so there is no double application. Verify that
+  stays true.
 ```
 
 Regenerate no data. This is a pure runtime change.
 
-### Explicitly NOT in this step
+### Expect the map to change
+
+Arrow speeds drop by roughly 40%. The wind-scale colours will shift toward the low end and the map
+will look calmer. That is the boundary layer finally being applied, not a regression. Check a
+screenshot before and after and keep both.
+
+---
+
+## Step 2b — Route on the canyon-modified wind (NOT for auto mode)
+
+`edgeHeadwind()` calls `resistance()`, which applies a flat 0.6 and ignores building geometry
+entirely. The router should use the same canyon-modified wind the arrows use.
+
+**This is blocked on a data join, and the join is not obvious.** Verified 2026-09-03:
+
+- `Edge` in `routing/graph.ts` carries only `{ to, lengthM, bearingDeg, wayId, highway }`.
+  No cross-section fields.
+- `buildGraph()` reads `public/data/cph-roads.json`.
+- The arrows read `public/data/cph-segments.json`, built separately by
+  `compute-cross-sections.mjs` with `MIN_SEGMENT_M = 20`.
+
+So the graph and the cross-sections come from two different files with no shared key beyond
+`wayId`, and a way holds many edges and many segments which are **not 1:1** — short pieces are
+merged or dropped by the 20 m minimum, and there is a separate coverage fallback for short ways.
+
+Decide the join strategy with a human before writing code. The options are roughly:
+
+1. Attach cross-sections to edges at `buildGraph()` time by matching on `wayId` plus nearest
+   segment midpoint. Costs a spatial index at load.
+2. Emit a single unified segment file from `compute-cross-sections.mjs` that the graph and the
+   arrow layer both consume, removing the two-source problem at its root.
+3. Accept per-way average cross-section for routing, which is cheap and lossy.
+
+Option 2 is the real fix and the largest change. Do not start any of them in auto mode.
+
+### Explicitly NOT in scope at all
 
 The canyon vortex. Above λ ≈ 0.65 real canyons enter skimming flow and street-level wind reverses
 relative to the flow above. The current transform can only shrink the cross component toward zero,
