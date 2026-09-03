@@ -2,10 +2,12 @@
 import { describe, it, expect } from "vitest";
 import {
   WIND_BANDS,
+  ROUTE_IMPACTS,
   windBand,
   windBandColor,
   routeImpact,
   streetImpact,
+  type RGB,
 } from "./windCategory";
 import { canyonModifiedWind } from "../math";
 
@@ -157,5 +159,92 @@ describe("band occupancy over Copenhagen's wind climate", () => {
     const shares = counts.map((c) => (100 * c) / n);
     expect(Math.max(...shares)).toBeGreaterThan(40); // one band swallows the map
     expect(Math.min(...shares)).toBeLessThan(1); //    and the top ones never light up
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 3b: the four gates the first palette pass missed. The map ramp encodes
+// magnitude and ROUTE_IMPACTS encodes direction; both are on screen at once, so
+// they must not look alike. Arrows are ~8px glyphs, so WCAG 1.4.11's 3:1 for
+// graphical objects applies — the 2:1 ordinal light-end floor is not enough.
+// ---------------------------------------------------------------------------
+
+const srgbToLinear = (c: number): number => {
+  const v = c / 255;
+  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+};
+
+/** WCAG relative luminance. */
+function relLuminance([r, g, b]: RGB): number {
+  const [R, G, B] = [r, g, b].map(srgbToLinear);
+  return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+}
+
+/** WCAG contrast ratio against white, which is lighter than every band. */
+const contrastVsWhite = (c: RGB): number => 1.05 / (relLuminance(c) + 0.05);
+
+/** OKLab, the perceptually uniform space the ΔE floors are measured in. */
+function oklab([r, g, b]: RGB): [number, number, number] {
+  const R = srgbToLinear(r), G = srgbToLinear(g), B = srgbToLinear(b);
+  const l = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B);
+  const m = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B);
+  const s = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+  return [
+    0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+  ];
+}
+
+/** Euclidean distance in OKLab, ×100 — the same scale the dataviz gates use. */
+function deltaE(a: RGB, b: RGB): number {
+  const [al, aa, ab] = oklab(a), [bl, ba, bb] = oklab(b);
+  return 100 * Math.hypot(al - bl, aa - ba, ab - bb);
+}
+
+const hex = (c: RGB) => "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
+
+describe("WIND_BANDS palette gates", () => {
+  it("every band clears 3:1 against a white road (WCAG 1.4.11)", () => {
+    // Arrows are graphical objects, not text, and they draw over #ffffff roads.
+    // The rust ramp this replaced put Calm at 2.13:1 and Light at 2.95:1 —
+    // together 48.2% of the map sitting below the floor.
+    for (const b of WIND_BANDS) {
+      const ratio = contrastVsWhite(b.color);
+      expect(ratio, `${b.label} ${hex(b.color)} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("no band is confusable with a panel headwind colour", () => {
+    // Magnitude must not read as direction. The rust ramp put map Moderate at
+    // ΔE 0.8 from panel Headwind and map Strong at 1.4 from Strong headwind —
+    // the same colour carrying two different meanings on one screen.
+    const headwinds = ROUTE_IMPACTS.filter((r) => r.key.includes("headwind"));
+    expect(headwinds).toHaveLength(3);
+    let worst = Infinity, pair = "";
+    for (const b of WIND_BANDS) {
+      for (const h of headwinds) {
+        const d = deltaE(b.color, h.color);
+        if (d < worst) { worst = d; pair = `map ${b.label} ${hex(b.color)} vs panel ${h.label} ${hex(h.color)}`; }
+      }
+    }
+    expect(worst, `closest pair is ${pair} at ΔE ${worst.toFixed(1)}`).toBeGreaterThanOrEqual(12);
+  });
+
+  it("lightness decreases strictly down the ramp", () => {
+    // Order lives in lightness, which is the part colour blindness leaves intact.
+    const Ls = WIND_BANDS.map((b) => oklab(b.color)[0]);
+    for (let i = 1; i < Ls.length; i++) {
+      expect(Ls[i], `${WIND_BANDS[i].label} L ${Ls[i].toFixed(3)} vs ${WIND_BANDS[i - 1].label} L ${Ls[i - 1].toFixed(3)}`)
+        .toBeLessThan(Ls[i - 1]);
+    }
+  });
+
+  it("adjacent bands stay apart", () => {
+    for (let i = 1; i < WIND_BANDS.length; i++) {
+      const d = deltaE(WIND_BANDS[i - 1].color, WIND_BANDS[i].color);
+      expect(d, `${WIND_BANDS[i - 1].label} -> ${WIND_BANDS[i].label} is ΔE ${d.toFixed(1)}`)
+        .toBeGreaterThanOrEqual(7);
+    }
   });
 });

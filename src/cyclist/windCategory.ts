@@ -37,19 +37,31 @@ export interface WindBand {
 // (Severe needed a 13.8 m/s ambient even in the deepest aligned canyon). Do NOT "correct"
 // these back up to met-station numbers — they are deliberately lower.
 //
-// One-hue ordinal ramp: rust, OKLCH hue 52°→30°, lightness 0.765→0.345 in even steps.
-// Wind strength is an ordered magnitude, so the scale carries its order in lightness
-// rather than touring hues. The old teal→green→amber→orange→magenta ramp was not even
-// monotonic in lightness, and its two busiest bands (Calm↔Light) measured OKLab ΔE 7.5
-// under deuteranopia and 10.5 under normal vision — effectively one colour. Every
-// adjacent pair here clears ΔE 8.2 deutan / 8.0 protan, on lightness alone.
+// One-hue ordinal ramp: indigo, OKLab lightness 0.661→0.280 in even steps. Wind strength
+// is an ordered magnitude, so the scale carries its order in lightness rather than touring
+// hues — the teal→green→amber→orange→magenta ramp this replaced was not even monotonic
+// (Moderate sat lighter than Calm), and its two busiest bands measured OKLab ΔE 7.5 under
+// deuteranopia, i.e. one colour.
+//
+// Indigo specifically, for two measured reasons. Both are pinned as gates in
+// windCategory.test.ts — do not repalette this ramp without re-running them.
+//   1. Arrows are ~8 px graphical objects over white roads, so WCAG 1.4.11 asks for 3:1,
+//      not the 2:1 floor a sequential ramp light end would otherwise get. A rust ramp
+//      tried first put Calm at 2.13:1 and Light at 2.95:1 — together 48.2% of the map
+//      below the floor. Indigo runs 3.15:1 (Calm) to 15.41:1 (Severe).
+//   2. ROUTE_IMPACTS below encodes *direction* in teal ↔ rust and is on screen at the
+//      same time as this ramp, which encodes *magnitude*. A rust ramp collided with it:
+//      map Moderate sat ΔE 0.8 from panel Headwind, and map Strong 1.4 from Strong
+//      headwind. The indigo ramp is 19.1 from the nearest panel headwind colour.
+// Indigo also stays clear of the basemap, which spends teal on water and green on parks.
+// Adjacent ΔE 7.7, carried on lightness — the channel colour blindness leaves intact.
 export const WIND_BANDS: WindBand[] = [
-  { key: "calm", label: "Calm", minMs: 0, maxMs: 1.2, color: [204, 171, 152], blurb: "Wind is not a factor." },
-  { key: "light", label: "Light", minMs: 1.2, maxMs: 2.4, color: [195, 137, 106], blurb: "Easy riding; a slight push or resistance." },
-  { key: "moderate", label: "Moderate", minMs: 2.4, maxMs: 3.6, color: [183, 103, 64], blurb: "Noticeable effort into a headwind." },
-  { key: "strong", label: "Strong", minMs: 3.6, maxMs: 5, color: [163, 72, 32], blurb: "Hard work into a headwind; affects pace." },
-  { key: "very_strong", label: "Very strong", minMs: 5, maxMs: 7, color: [134, 47, 23], blurb: "Tough; gusts can affect balance." },
-  { key: "severe", label: "Severe", minMs: 7, maxMs: Infinity, color: [100, 29, 21], blurb: "Hazardous. Best avoided." },
+  { key: "calm", label: "Calm", minMs: 0, maxMs: 1.2, color: [130, 142, 202], blurb: "Wind is not a factor." },
+  { key: "light", label: "Light", minMs: 1.2, maxMs: 2.4, color: [106, 118, 185], blurb: "Easy riding; a slight push or resistance." },
+  { key: "moderate", label: "Moderate", minMs: 2.4, maxMs: 3.6, color: [83, 94, 168], blurb: "Noticeable effort into a headwind." },
+  { key: "strong", label: "Strong", minMs: 3.6, maxMs: 5, color: [62, 70, 150], blurb: "Hard work into a headwind; affects pace." },
+  { key: "very_strong", label: "Very strong", minMs: 5, maxMs: 7, color: [43, 45, 133], blurb: "Tough; gusts can affect balance." },
+  { key: "severe", label: "Severe", minMs: 7, maxMs: Infinity, color: [27, 15, 115], blurb: "Hazardous. Best avoided." },
 ];
 
 /** Strength band for a street-level wind speed (m/s). */
