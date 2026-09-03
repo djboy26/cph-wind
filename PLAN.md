@@ -67,6 +67,13 @@ sits on top of it correctly.
 **The bearing and resistance maths is not the bug. Do not refactor it, do not re-derive it, do not
 "fix" the bearing formula or flip the `+headwind` sign convention.**
 
+**Scope of the "a failing test means the code is wrong" rule.** It applies to tests that pin the
+verified maths above — bearing, resistance, the travel vector, the sign convention. It does **not**
+apply to a test that encodes behaviour a step is deliberately changing. When a step's stated intent
+and an existing test disagree, the test is describing the old behaviour: update it, rename it
+honestly, comment why, and say so in your report. Stopping to flag the collision is right; treating
+the rule as absolute and abandoning a correct change is not.
+
 There *is* one real defect in this file — `streetLevelWind()` is never applied inside
 `canyonModifiedWind()`. It has its own step (step 2) with its own tests. Fix it there, deliberately.
 Do not fix it opportunistically while doing step 1.
@@ -171,7 +178,7 @@ as "the wind is the same on these routes".
 
 ## Step 2a — Apply the boundary layer inside the canyon model
 
-**File:** `src/math/index.ts`, then `src/routing/windRoute.ts`
+**File:** `src/math/index.ts` only. Routing is step 2b.
 
 ### The bug
 
@@ -243,6 +250,40 @@ Regenerate no data. This is a pure runtime change.
 Arrow speeds drop by roughly 40%. The wind-scale colours will shift toward the low end and the map
 will look calmer. That is the boundary layer finally being applied, not a regression. Check a
 screenshot before and after and keep both.
+
+### Completed 2026-09-03 — commit `752f8c2`, branch `fix/canyon-boundary-layer`
+
+`streetLevelWind()` applied once at the top of `canyonModifiedWind()`, and on the λ < 0.1 early
+return, gusts included. `npm run check` green: **86 tests** (was 81). `src/routing/` untouched.
+
+Energy test written first and confirmed failing on the unmodified model: **3168 of 9072**
+combinations returned more wind than the ambient they were given, worst case 1.450 × — exactly the
+`alongFactor` cap. After the fix, zero.
+
+Independently re-verified 2026-09-03 over 6,912 combinations (λ ∈ {0, 0.05, 0.1, 0.34, 0.65, 1.0,
+1.5, 2.5} × wind 0–350° × bearing 0–345°):
+
+| λ | scale, aligned | band at 3.9 m/s ambient |
+|---|---|---|
+| 0.00 / 0.05 | 0.600 × | Light |
+| 0.34 (median) | 0.661 × | Light |
+| 0.65 | 0.717 × | Light |
+| 1.00 | 0.780 × | Light |
+| 1.50+ | **0.870 ×** (the bound) | Light |
+
+Zero energy violations. Gusts scale identically to the mean on every path, early return included.
+Map/router gap at the median is now **1.10 ×**, down from 1.84 ×; the remainder is channeling, which
+is real physics rather than disagreement.
+
+**One pre-existing test was changed, correctly.** `computeSegmentLanes > "open field (no buildings)"`
+asserted that a 10 m/s ambient returns ~10 m/s on the λ < 0.1 path. That is the defect this step
+removes. It now asserts 6 m/s under a renamed heading. See the scoping note under "Do not touch"
+above — the agent flagged the rule collision rather than deciding silently, which was the right call.
+
+**Known cosmetic gap, not worth a commit on its own:** the `speedMs < 1e-6` guard returns
+`gustMs: ambientWind.gustMs` unreduced. Unreachable in practice — `crossFactor` floors at 0.05, so
+reaching it needs an ambient below 2 × 10⁻⁵ m/s, and `ambientWind.speedMs <= 0` is already caught
+above. Fold it into the next edit of this file.
 
 ---
 
