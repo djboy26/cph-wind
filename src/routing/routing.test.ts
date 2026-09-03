@@ -10,6 +10,7 @@ import {
   planRoutes,
   rankRoutes,
   DEFAULT_PARAMS,
+  type RouteOption,
 } from './windRoute';
 import type { RoutePath } from './pathfind';
 
@@ -169,7 +170,7 @@ describe('rankRoutes', () => {
   });
 
   it('handles an empty option set', () => {
-    expect(rankRoutes([], 'time')).toEqual({ sorted: [], bestId: null });
+    expect(rankRoutes([], 'time')).toEqual({ sorted: [], bestId: null, windIsSimilar: false });
   });
 
   // Regression: by exposure, a direct crosswind route must beat a longer detour
@@ -202,6 +203,130 @@ describe('rankRoutes', () => {
     const best = sorted.find((o) => o.id === bestId)!;
     for (const o of sorted) {
       expect(best.metrics.headwindExposure).toBeLessThanOrEqual(o.metrics.headwindExposure + 1e-9);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 1 regressions: the ranker must not let trivial wind differences outvote
+// real time differences, and must never recommend a strictly dominated route.
+// ---------------------------------------------------------------------------
+
+/**
+ * A synthetic route carrying a uniform headwind over its whole length. `rankRoutes`
+ * reads nothing but `metrics`, so the path and coords are stubs. The metrics are
+ * derived through the real `effectiveSpeed()` so `timeS` and `windDeltaS` stay
+ * consistent with whatever `DEFAULT_PARAMS` currently says.
+ */
+function mkRoute(
+  id: string,
+  distanceM: number,
+  avgHeadwindMs: number,
+  headwindExposure?: number,
+): RouteOption {
+  const p = DEFAULT_PARAMS;
+  const timeS = distanceM / effectiveSpeed(avgHeadwindMs, p);
+  const calmTimeS = distanceM / p.baseSpeedMs;
+  return {
+    id,
+    kind: 'alternative',
+    path: { nodes: [], edges: [], cost: distanceM, distanceM },
+    metrics: {
+      distanceM,
+      timeS,
+      calmTimeS,
+      windDeltaS: timeS - calmTimeS,
+      avgHeadwindMs,
+      headwindExposure:
+        headwindExposure ?? (avgHeadwindMs > p.headwindThresholdMs ? 1 : 0),
+    },
+    coords: [],
+  };
+}
+
+describe('rankRoutes — recommended is wind-adjusted time, not a blend', () => {
+  // Reproduced against production 2026-09-03, wind 3.1 m/s from 202.5° (SSW).
+  // The old weighted blend scored A at 0.450 and picked it, even though A is
+  // strictly dominated by C: 80 m longer for identical average headwind.
+  // Distances, average headwinds and into-wind exposures are the production values.
+  // The exposures matter: they are what let the blend's 0.35 exposure + 0.20 avgWind
+  // weights (0.55) outvote its 0.45 on time. Drop them and the old ranker happens to
+  // get this case right, so the regression would not be pinned.
+  const A = mkRoute('route-A', 1770, 1.1, 0.61);
+  const B = mkRoute('route-B', 1390, 1.4, 0.77);
+  const C = mkRoute('route-C', 1690, 1.1, 0.71);
+  const live = [A, B, C];
+
+  it('picks the short route when wind costs every option the same', () => {
+    const { bestId, windIsSimilar } = rankRoutes(live, 'recommended');
+    // windDeltaS spread across the three is ~3.5 s, far under the 15 s threshold.
+    expect(windIsSimilar).toBe(true);
+    expect(bestId).toBe('route-B');
+  });
+
+  it('does not pick the dominated route that the old blend picked', () => {
+    // Confirm A really is dominated before asserting it loses.
+    expect(A.metrics.distanceM).toBeGreaterThan(C.metrics.distanceM);
+    expect(A.metrics.avgHeadwindMs).toBeCloseTo(C.metrics.avgHeadwindMs, 12);
+    expect(A.metrics.timeS).toBeGreaterThan(C.metrics.timeS);
+    expect(rankRoutes(live, 'recommended').bestId).not.toBe('route-A');
+  });
+
+  it('still lets a longer route win when wind genuinely discriminates', () => {
+    // Strong wind. At the current windSensitivity the long way is ~79 s cheaper.
+    const short = mkRoute('route-A', 1390, 4.0);
+    const long = mkRoute('route-B', 1690, 1.2);
+    const { bestId, windIsSimilar } = rankRoutes([short, long], 'recommended');
+    expect(long.metrics.distanceM).toBeGreaterThan(short.metrics.distanceM);
+    expect(windIsSimilar).toBe(false);
+    expect(bestId).toBe('route-B'); // the fix does not collapse to "always shortest"
+  });
+
+  it('flags windIsSimilar from the windDeltaS spread alone', () => {
+    const spread = (rs: RouteOption[]) => {
+      const d = rs.map((r) => r.metrics.windDeltaS);
+      return Math.max(...d) - Math.min(...d);
+    };
+    expect(spread(live)).toBeLessThan(15);
+    expect(rankRoutes(live, 'recommended').windIsSimilar).toBe(true);
+
+    const wide = [mkRoute('a', 1500, 5.0), mkRoute('b', 1500, 0.0)];
+    expect(spread(wide)).toBeGreaterThan(15);
+    expect(rankRoutes(wide, 'recommended').windIsSimilar).toBe(false);
+
+    // A single option has zero spread, so wind cannot be discriminating.
+    expect(rankRoutes([A], 'recommended').windIsSimilar).toBe(true);
+  });
+
+  // The dominance rule, asserted directly over randomised inputs: the winner must
+  // never be longer than another option while being no better on time or on
+  // average headwind. Headwinds run wide enough to exercise the speed clamps.
+  it('never ranks a dominated route first, for any input', () => {
+    let seed = 0x9e3779b9;
+    const rand = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+
+    for (let trial = 0; trial < 500; trial++) {
+      const n = 2 + Math.floor(rand() * 4);
+      const opts = Array.from({ length: n }, (_, i) =>
+        mkRoute(`route-${i}`, 300 + rand() * 4000, -12 + rand() * 24),
+      );
+      for (const crit of ['recommended', 'time'] as const) {
+        const { bestId } = rankRoutes(opts, crit);
+        const best = opts.find((o) => o.id === bestId)!;
+        for (const o of opts) {
+          if (o.id === best.id) continue;
+          const dominated =
+            best.metrics.distanceM > o.metrics.distanceM &&
+            best.metrics.avgHeadwindMs >= o.metrics.avgHeadwindMs &&
+            best.metrics.timeS >= o.metrics.timeS;
+          expect(dominated).toBe(false);
+        }
+      }
     }
   });
 });
