@@ -21,7 +21,12 @@ export interface CyclingParams {
 
 export const DEFAULT_PARAMS: CyclingParams = {
   baseSpeedMs: 5,
-  windSensitivity: 0.4,
+  // Speed lost per m/s of headwind. Derived by holding rider power constant in
+  //     P = ½·ρ·C_dA·(v + w)²·v + C_rr·m·g·v
+  // at 18 km/h with C_dA 0.40 m² and 90 kg (rider + commuter bike, C_rr 0.005):
+  // the first m/s of headwind costs 0.52 m/s of ground speed, and the mean cost
+  // out to 3 m/s of headwind is ≈0.49. 0.5 sits between the two.
+  windSensitivity: 0.5,
   minSpeedMs: 1.2,
   maxSpeedMs: 8.5,
   // A gentle but noticeable headwind. At 2 m/s this almost never triggered on a
@@ -168,15 +173,11 @@ export const RANK_CRITERIA: { key: RankCriterion; label: string; hint: string }[
   { key: 'avgWind', label: 'Calmest', hint: 'Lowest average headwind' },
 ];
 
-// Weights for the balanced "Recommended" score (each normalised 0..1, lower=better).
-const RECOMMENDED_WEIGHTS = { time: 0.45, exposure: 0.35, avgWind: 0.2 };
-
-function normaliser(values: number[]): (v: number) => number {
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min;
-  return (v) => (range > 1e-9 ? (v - min) / range : 0);
-}
+/**
+ * Below this spread in `windDeltaS` (seconds) across the options, wind is not
+ * telling the rider anything useful about which way to go.
+ */
+const WIND_SIMILAR_SPREAD_S = 15;
 
 function rawValue(o: RouteOption, key: Exclude<RankCriterion, 'recommended'>): number {
   if (key === 'time') return o.metrics.timeS;
@@ -184,30 +185,48 @@ function rawValue(o: RouteOption, key: Exclude<RankCriterion, 'recommended'>): n
   return o.metrics.avgHeadwindMs; // avgWind — lower (more tailwind) is better
 }
 
+export interface RankResult {
+  sorted: RouteOption[];
+  bestId: string | null;
+  /**
+   * True when wind costs every option about the same — the `windDeltaS` spread is
+   * under WIND_SIMILAR_SPREAD_S. `recommended` then ranks by distance instead of
+   * time, and the UI can say that wind is a wash today.
+   */
+  windIsSimilar: boolean;
+}
+
 /**
  * Sort routes by the chosen criterion (lower is better for all of them) and
- * return the winner's id. "recommended" is a weighted, range-normalised blend of
- * time, into-wind exposure, and average headwind.
+ * return the winner's id.
+ *
+ * `recommended` is an alias of `timeS`. The wind-adjusted time already prices the
+ * wind in via `effectiveSpeed()`, so the old weighted blend of `timeS`,
+ * `headwindExposure` and `avgHeadwindMs` counted the same wind three times — and
+ * because each axis was min-max rescaled to 0..1, 0.3 m/s of wind spread outvoted
+ * a minute of time. The one departure is `windIsSimilar`: when wind costs every
+ * option the same, distance decides.
+ *
+ * Every comparator breaks ties on the other axis (time ↔ distance). That is what
+ * makes the dominance rule hold: a route longer than another and no better on
+ * time or average headwind can never rank first.
  */
-export function rankRoutes(
-  options: RouteOption[],
-  criterion: RankCriterion,
-): { sorted: RouteOption[]; bestId: string | null } {
-  if (options.length === 0) return { sorted: [], bestId: null };
+export function rankRoutes(options: RouteOption[], criterion: RankCriterion): RankResult {
+  if (options.length === 0) return { sorted: [], bestId: null, windIsSimilar: false };
 
-  let score: (o: RouteOption) => number;
+  const deltas = options.map((o) => o.metrics.windDeltaS);
+  const windIsSimilar = Math.max(...deltas) - Math.min(...deltas) < WIND_SIMILAR_SPREAD_S;
+
+  let cmp: (a: RouteOption, b: RouteOption) => number;
   if (criterion === 'recommended') {
-    const nt = normaliser(options.map((o) => o.metrics.timeS));
-    const ne = normaliser(options.map((o) => o.metrics.headwindExposure));
-    const na = normaliser(options.map((o) => o.metrics.avgHeadwindMs));
-    score = (o) =>
-      RECOMMENDED_WEIGHTS.time * nt(o.metrics.timeS) +
-      RECOMMENDED_WEIGHTS.exposure * ne(o.metrics.headwindExposure) +
-      RECOMMENDED_WEIGHTS.avgWind * na(o.metrics.avgHeadwindMs);
+    cmp = windIsSimilar
+      ? (a, b) => a.metrics.distanceM - b.metrics.distanceM || a.metrics.timeS - b.metrics.timeS
+      : (a, b) => a.metrics.timeS - b.metrics.timeS || a.metrics.distanceM - b.metrics.distanceM;
   } else {
-    score = (o) => rawValue(o, criterion);
+    cmp = (a, b) =>
+      rawValue(a, criterion) - rawValue(b, criterion) || a.metrics.distanceM - b.metrics.distanceM;
   }
 
-  const sorted = [...options].sort((a, b) => score(a) - score(b));
-  return { sorted, bestId: sorted[0].id };
+  const sorted = [...options].sort(cmp);
+  return { sorted, bestId: sorted[0].id, windIsSimilar };
 }
