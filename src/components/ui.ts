@@ -20,9 +20,14 @@ export const COLORS = {
   accentInk: "#1c4fd0",
   accentWash: "rgba(47,106,240,0.10)",
   accentLine: "rgba(47,106,240,0.42)",
-  good: "#1f9d57",
+  // Teal/rust, not green/red. This pair carries the tailwind/headwind distinction
+  // — the most important signal in the app — and green vs red is the one pair that
+  // ~8% of men cannot separate: #1f9d57 vs #e0533d measured OKLab ΔE 5.5 under
+  // deuteranopia, below the 8 floor. Teal vs rust measures 15.4. Both clear WCAG
+  // 4.5:1 text contrast on the frosted surfaces (5.29:1 and 5.13:1 on white).
+  good: "#2e7488",
   warn: "#cf871d",
-  bad: "#e0533d",
+  bad: "#b0522e",
   chipBg: "rgba(20,32,43,0.045)",
 };
 
