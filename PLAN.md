@@ -713,6 +713,54 @@ Stop after the component builds and `npm run check` passes. Do not proceed to po
 takes phone screenshots of three states — no route, calm day (`windIsSimilar` true), and a state
 where wind discriminates — and those decide whether it is done.
 
+### Completed 2026-09-03 — commit `434b1de`, branch `feat/route-panel-redesign`
+
+Copy decisions extracted to `routeCopy.ts` with 14 tests covering every row of both spec tables.
+111 tests green (was 97). Lint and build clean. Component holds only markup.
+
+---
+
+## Step 4b — Three fixes the spec caused
+
+**Two of these are spec errors, not implementation errors.** The agent built what was written and
+flagged both rather than inventing around them. That was correct.
+
+**1. The waypoint rows lost their affordance.** The spec gave measurements
+(13.5 px, 7 px dot, 10 px gap, `5px 0` padding) taken from the mockup — where those rows *displayed*
+already-chosen waypoints. In the real app they are `LocationSearch` inputs. Unboxed, they no longer
+read as tappable.
+
+Restore the affordance without restoring the box: keep the type and spacing exactly as built, and
+add a **1 px `var(--line)` bottom border on each waypoint row**, with `padding-bottom` raised from
+5 px to 8 px. A hairline underline says "field" without reintroducing a container. The existing rule
+between the waypoints and the route list then becomes redundant — remove it, the two underlines do
+that job.
+
+**2. Selection has no visual state.** The spec removed every per-row treatment and then spent the
+only remaining colour on rank. But **order already carries rank** — that was the argument for
+deleting the star. So the accent has no job.
+
+Move it: **the accent marks the selected row, not the first row.** Default the selection to
+`bestId` on load, so the initial render is unchanged. Clicking a row moves the accent to it. No new
+visual vocabulary, and selection becomes visible for free.
+
+**3. The forecast-hour label.** The spec asked for it and gave no string and no slot, so it was
+correctly left undone. Both, now:
+
+- **Slot:** a line directly above the route list, 12 px, `COLORS.dim`, `margin-bottom 10px`.
+- **String:** `Times below use the 16:00 forecast.` — hour formatted as `HH:mm`, same formatter the
+  `TimeSlider` uses.
+- **Condition:** render only when the selected forecast hour is not the current hour. Nothing when
+  it is.
+
+Add it to `routeCopy.ts` as `forecastNote(selectedHour: Date | null, now: Date): string | null` and
+test the null case.
+
+### Acceptance
+
+`npm run check` and `npm run build`. Then the same three screenshots step 4 asked for, which have
+not been taken yet.
+
 ---
 
 ## Step 5 — Map legibility and honesty

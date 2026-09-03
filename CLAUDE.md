@@ -54,6 +54,13 @@ npm run data:validate
 
 Generated artefacts in `public/data/` are committed. `segtiles/` is the tiled form the app loads.
 
+## Shell working directory
+
+Start every session with `cd` into this repo and stay there. Tooling that resolves config from the
+shell's cwd — the browser preview launcher in particular, which reads `launch.json` — will otherwise
+pick up whatever unrelated project the shell happens to be sitting in. This has already happened
+once and started a different project's dev server.
+
 ## Working style
 
 - Commit at each step boundary in `PLAN.md`, with the step named in the message.
