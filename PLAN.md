@@ -1,6 +1,7 @@
 # cph-wind — Ranker fix and panel rebuild
 
-Written 2026-09-03. Scoped deliberately. Do the steps in order. Step 3 depends on step 1's tie flag and on step 2's corrected wind.
+Written 2026-09-03. Scoped deliberately. Do the steps in order. Do the steps in order. Step 4 depends on step 1's tie flag and on step 2a's corrected wind.
+Step 3 exists because step 2a invalidated the scale it recalibrates.
 
 ---
 
@@ -327,9 +328,66 @@ hits it, so a tower 60 m upwind has no effect).
 
 ---
 
-## Step 3 — Rebuild `RoutePanel.tsx`
+## Step 3 — Recalibrate and repalette the wind scale
 
-Reference mockup: the published "Route Panel Redesign" artifact. Same data, 22 numbers down to 7.
+Step 2a dropped every arrow by 40%, which was correct. It also broke the scale those arrows are
+coloured by, because `WIND_BANDS` was calibrated against unreduced 10 m wind.
+
+### The scale is now mostly dead
+
+Modelling Copenhagen's 10 m wind as Weibull(k = 2, c = 6.1), annual mean ≈ 5.4 m/s, over a
+median-λ street with orientation uniform:
+
+| band | current | share of the map | proposed | share |
+|---|---|---|---|---|
+| Calm | 0–2 m/s | **37.5%** | 0–1.2 | 16.2% |
+| Light | 2–4 | **42.7%** | 1.2–2.4 | 32.1% |
+| Moderate | 4–6 | 15.6% | 2.4–3.6 | 25.9% |
+| Strong | 6–9 | 4.0% | 3.6–5.0 | 16.3% |
+| Very strong | 9–12 | **0.2%** | 5.0–7.0 | 7.9% |
+| Severe | 12+ | **0.0%** | 7.0+ | 1.7% |
+
+**80.2% of the map now sits in two bands, and the top two are unreachable.** Severe needs an
+ambient of 13.8 m/s even in the deepest aligned canyon, and 18.2 m/s on a median street. The legend
+shows six swatches of which two carry almost everything and two never light up.
+
+Street-level distribution after step 2a: median **2.47 m/s**, p10 0.93, p90 4.95.
+
+### Changes
+
+1. **Retune `WIND_BANDS` thresholds** in `src/cyclist/windCategory.ts` to `1.2 / 2.4 / 3.6 / 5.0 /
+   7.0`. Keep the six labels and the blurbs; they still describe the right experiences, they were
+   just attached to the wrong numbers.
+2. **These are rider-height thresholds now.** Say so in a comment, with the median and p90 above, so
+   the next person does not "correct" them back to met-station values.
+3. **Retire the red/green semantic pair** in `src/components/ui.ts`:
+   `good: "#1f9d57"` → `"#2e7488"` (teal), `bad: "#e0533d"` → `"#b0522e"` (rust).
+   This pair carries the tailwind/headwind distinction, which is the most important signal in the
+   app, using the one colour pair ~8% of men cannot separate — in a cycling app for a cycling city.
+4. **Rotate the six-stop map ramp** away from teal → green → amber → orange → magenta. Green → amber
+   → orange is three steps that collapse to one under deuteranopia, and they are the three middle
+   bands that now carry 74% of the map. Load the `dataviz` skill before choosing replacements.
+5. **Update `ROUTE_IMPACTS`** to match, so the panel and the map agree on what a headwind looks like.
+
+### Acceptance
+
+```
+band occupancy over Weibull(2, 6.1) ambient x lambda 0.34 x uniform orientation:
+  no band below 1% or above 40%
+
+deuteranopia simulation of the six ramp stops: every adjacent pair stays distinguishable
+
+existing windCategory tests updated to the new thresholds, with the old values
+noted in a comment as the pre-step-2a calibration
+```
+
+Take a before and after screenshot of the same Nørrebro view. The map should regain visible
+structure — right now it reads as two colours.
+
+## Step 4 — Rebuild `RoutePanel.tsx`
+
+Reference mockup: the published "Route Panel Redesign" artifact. Do step 3 first — the
+recalibrated bands change what the panel renders. Same data, 22 numbers down to 7.
 
 ### Remove
 
@@ -380,24 +438,6 @@ legibility problem before it is an aesthetic one. Keep `glass` on the small floa
 where nothing has to be read at length.
 
 Keep Inter. The typeface is the least important part of this change.
-
----
-
-## Step 4 — Retire the red/green semantic pair
-
-**File:** `src/components/ui.ts`
-
-`good: #1f9d57` against `bad: #e0533d` carries the tailwind/headwind distinction, which is the most
-important signal in the app, using the one colour pair that roughly 8% of men cannot separate.
-
-```
-good: "#1f9d57"  ->  "#2e7488"    // teal
-bad:  "#e0533d"  ->  "#b0522e"    // rust
-```
-
-Apply the same rotation to the five-stop map wind scale, which currently runs
-teal → green → amber → orange → magenta. Green→amber→orange is three steps that collapse into one
-under deuteranopia. Check a simulated screenshot before merging.
 
 ---
 
