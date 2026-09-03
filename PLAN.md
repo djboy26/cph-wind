@@ -793,9 +793,31 @@ Three things step 3c left behind, all map-side. Small, and they travel together 
 the same two files.
 
 **1. Glyph legibility.** Adjacent bands are ΔE 7.7 apart, which reads clearly in a 20 px legend
-swatch and marginally on an 8 px anti-aliased arrow over a light basemap. The palette is finished;
-the remaining lever is size and decimation. `FlowLineLayer.sizeForSpeed()` clamps to 3–9.5 px —
-widen the range and check density at zoom 13 as well as 16.
+swatch and marginally on a small anti-aliased arrow over a light basemap. The palette is finished;
+the remaining lever is size.
+
+`FlowLineLayer.sizeForSpeed()` is `clamp(2.6 + 0.95·v, 3, 9.5)`. After step 3c the realistic
+street-level speeds are roughly 0.25× to 0.72× ambient, which compresses the whole map into a
+narrow band of sizes:
+
+| ambient | street p10 → p90 | current size | proposed size |
+|---|---|---|---|
+| 2.0 m/s | 0.50 → 1.44 | 3.1 – 4.0 px | 4.0 – 5.4 px |
+| 4.4 m/s | 1.10 → 3.17 | 3.6 – 5.6 px | 4.9 – 8.0 px |
+| 7.0 m/s | 1.75 → 5.04 | 4.3 – 7.4 px | 5.8 – 10.8 px |
+| 11.0 m/s | 2.75 → 7.92 | 5.2 – 9.5 px | 7.3 – 14.0 px |
+
+The 3 px floor swallows everything under 0.42 m/s, so six colour bands are being drawn across about
+three pixels of size difference. **Change to `clamp(3.2 + 1.5·v, 4, 14)`**, which roughly doubles
+the usable spread.
+
+**This number is a first guess and needs eyes.** It is derived from the speed distribution, not from
+looking at the map — the one thing in this plan that cannot be. Expect a second pass after
+screenshots. Say so in your report rather than treating it as settled.
+
+**Do not touch density or decimation** without reporting first. Check whether any zoom-dependent
+thinning exists and say what you found; if there is none, that is a finding for a later step, not
+something to invent now.
 
 **2. Make the dual encoding deliberate.** After 3c the map encodes *shelter* in colour and *absolute
 strength* in size. That is the right pair and it happened by accident. Write it down in a comment in
