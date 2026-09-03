@@ -8,9 +8,22 @@ import { offsetLonLat, offsetAlongBearing, type Wind } from '../math';
 const DEG = Math.PI / 180;
 const MPER_DEG_LAT = 111_000;
 
+interface ArrowDebug {
+  lon: number;
+  lat: number;
+  bearingDeg: number;
+  offsetM: number;
+  baseAlongM: number;
+  flowDeg: number;
+  speedFactor: number;
+  phase0: number;
+  travelLenM: number;
+  segmentId: number;
+}
+
 // Mirror of WindFlowLayer.arrowPosition (kept in sync) so we can test without deck.gl.
 const BASE_RATE = 0.5;
-function arrowPositionAt(d: any, flowPhase: number) {
+function arrowPositionAt(d: ArrowDebug, flowPhase: number) {
   const mid = { lon: d.lon, lat: d.lat };
   const lateral = offsetLonLat(mid, d.bearingDeg, d.offsetM);
   const grid = offsetAlongBearing(lateral, d.bearingDeg, d.baseAlongM);
@@ -20,7 +33,7 @@ function arrowPositionAt(d: any, flowPhase: number) {
 }
 
 /** Perpendicular distance (m) of a point from the street centerline through the midpoint. */
-function lateralDistanceM(d: any, pos: { lon: number; lat: number }) {
+function lateralDistanceM(d: ArrowDebug, pos: { lon: number; lat: number }) {
   const mPerDegLon = MPER_DEG_LAT * Math.cos(d.lat * DEG);
   const dEast = (pos.lon - d.lon) * mPerDegLon;
   const dNorth = (pos.lat - d.lat) * MPER_DEG_LAT;
@@ -94,7 +107,7 @@ describe('buildWindArrows — confinement', () => {
 
 // Helper: recover the carriageway half-width an arrow was built with.
 // Arrows are placed at lateral fractions up to 0.32 of roadWidth + up to 0.12 cross drift.
-function roadHalfForArrow(a: any, segments: RawSegment[]): number {
+function roadHalfForArrow(a: ArrowDebug, segments: RawSegment[]): number {
   const s = segments[a.segmentId];
   return (s.roadWidthM ?? 7) / 2;
 }

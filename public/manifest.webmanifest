@@ -1,5 +1,5 @@
 {
-  "name": "Copenhagen Wind — live cycling wind map",
+  "name": "Copenhagen Wind · Live wind, street by street",
   "short_name": "CPH Wind",
   "description": "Live per-street wind for Copenhagen cyclists, modified by building geometry. Updates every 10 minutes.",
   "start_url": "/",

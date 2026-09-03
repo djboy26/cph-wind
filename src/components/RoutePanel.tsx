@@ -65,10 +65,13 @@ export default function RoutePanel({
       <button
         onClick={onToggle}
         className="lift"
-        style={{ ...glass, display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", fontWeight: 600, fontSize: 14, color: COLORS.text, cursor: "pointer" }}
+        style={{ ...glass, display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", fontWeight: 600, fontSize: 14, color: COLORS.text, cursor: "pointer" }}
       >
         <Icon name="route" size={17} color={COLORS.accent} />
-        Plan a route
+        <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, minWidth: 0 }}>
+          <span>Plan a route</span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: COLORS.dim }}>Search, tap the map, or use GPS</span>
+        </span>
       </button>
     );
   }
@@ -82,17 +85,26 @@ export default function RoutePanel({
   const exposures = options.map((o) => o.metrics.headwindExposure);
   const windSimilar = options.length > 1 && Math.max(...exposures) - Math.min(...exposures) < 0.06;
 
+  // Commute view: the wind you get going out reverses on the way back, so a tailwind
+  // now becomes a headwind later. Show both for the highlighted route.
+  const selected = options.find((o) => o.id === selectedId) ?? options.find((o) => o.id === bestId) ?? options[0];
+  const roundTrip = selected
+    ? { out: windSuffered(selected.metrics.avgHeadwindMs), back: windSuffered(-selected.metrics.avgHeadwindMs) }
+    : null;
+
   const criterionLabel = RANK_CRITERIA.find((c) => c.key === criterion)?.label ?? "";
   const status =
-    !start ? "Search an address, tap the map, or use GPS to set your start." :
+    !start ? "Search, tap the map, or use GPS for your start." :
     !end ? "Now choose your destination." :
-    building ? "Finding the best routes…" :
+    building ? "Finding routes…" :
     options.length === 0 ? "No route found between those points." :
-    windSimilar ? `${options.length} routes — wind is similar on all (★ = ${criterionLabel}).` :
-    `${options.length} routes ranked by ${criterionLabel} (★ = best).`;
+    windSimilar ? `${options.length} routes · wind similar on all` :
+    `${options.length} routes · ★ best for ${criterionLabel.toLowerCase()}`;
 
+  // Desktop: cap height so the panel (anchored at top:78) never reaches the
+  // forecast strip docked bottom-left; it scrolls internally instead.
   return (
-    <div style={{ ...glass, padding: "13px 15px", width: isMobile ? "auto" : 304, maxHeight: isMobile ? "46vh" : "72vh", overflowY: "auto" }}>
+    <div style={{ ...glass, padding: "13px 15px", width: isMobile ? "auto" : 304, maxHeight: isMobile ? "46vh" : "calc(100vh - 210px)", overflowY: "auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: -0.2 }}>Plan a route</span>
         <button
@@ -193,16 +205,24 @@ export default function RoutePanel({
                 </span>
                 <span style={{ fontSize: 10.5, color: COLORS.faint, ...NUM }}>{fmtKm(o.metrics.distanceM)}</span>
               </div>
-              {/* Three criteria: time · wind suffered · % into wind */}
-              <div style={{ fontSize: 11, color: COLORS.dim, marginTop: 5, display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, ...NUM }}>
-                <span><span style={{ color: COLORS.faint }}>time </span>{fmtMin(o.metrics.timeS)}</span>
-                <span><span style={{ color: COLORS.faint }}>wind </span><span style={{ color: wind.color, fontWeight: 600 }}>{wind.text}</span></span>
-                <span><span style={{ color: COLORS.faint }}>into wind </span>{Math.round(o.metrics.headwindExposure * 100)}%</span>
+              {/* time · wind suffered · % into wind — one concise line */}
+              <div style={{ fontSize: 11.5, color: COLORS.dim, marginTop: 4, ...NUM }}>
+                {fmtMin(o.metrics.timeS)} · <span style={{ color: wind.color, fontWeight: 600 }}>{wind.text}</span> · {Math.round(o.metrics.headwindExposure * 100)}% into wind
               </div>
             </button>
           );
         })}
       </div>
+
+      {roundTrip && (
+        <div style={{ marginTop: 11, paddingTop: 10, borderTop: `1px solid ${COLORS.hairline}` }}>
+          <div style={{ ...label, marginBottom: 5 }}>Round trip</div>
+          <div style={{ display: "flex", gap: 16, fontSize: 11.5, color: COLORS.dim, ...NUM }}>
+            <span><span style={{ color: COLORS.faint }}>out </span><span style={{ color: roundTrip.out.color, fontWeight: 600 }}>{roundTrip.out.text}</span></span>
+            <span><span style={{ color: COLORS.faint }}>back </span><span style={{ color: roundTrip.back.color, fontWeight: 600 }}>{roundTrip.back.text}</span></span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

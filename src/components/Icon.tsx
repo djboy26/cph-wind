@@ -15,7 +15,11 @@ export type IconName =
   | "reset"
   | "tap"
   | "pin"
-  | "swap";
+  | "swap"
+  | "rain"
+  | "alert"
+  | "sun"
+  | "moon";
 
 const PATHS: Record<IconName, ReactNode> = {
   // Navigation arrow inside a ring.
@@ -90,6 +94,30 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M13 11V9.2a1.8 1.8 0 1 1 3.6 0V14a6 6 0 0 1-6 6h-.7a6 6 0 0 1-4.6-2.2L3 15.2a1.8 1.8 0 0 1 2.7-2.3L7 14" />
     </>
   ),
+  // Cloud with falling drops.
+  rain: (
+    <>
+      <path d="M7 15.5a4 4 0 0 1 .4-7.98 5 5 0 0 1 9.5 1.2A3.4 3.4 0 0 1 16.5 15.5z" />
+      <path d="M8.5 18l-1 2M12 18l-1 2M15.5 18l-1 2" />
+    </>
+  ),
+  // Warning triangle with an exclamation.
+  alert: (
+    <>
+      <path d="M12 3.6 21 19a1 1 0 0 1-.87 1.5H3.87A1 1 0 0 1 3 19z" />
+      <path d="M12 9.5v4.2" />
+      <circle cx="12" cy="16.8" r="0.5" fill="currentColor" stroke="none" />
+    </>
+  ),
+  // Sun with rays.
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5V5M12 19v2.5M2.5 12H5M19 12h2.5M5.1 5.1l1.8 1.8M17.1 17.1l1.8 1.8M18.9 5.1l-1.8 1.8M6.9 17.1l-1.8 1.8" />
+    </>
+  ),
+  // Crescent moon.
+  moon: <path d="M20 14.5A8 8 0 0 1 9.5 4 7 7 0 1 0 20 14.5z" />,
 };
 
 interface Props {

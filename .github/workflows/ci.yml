@@ -1,0 +1,22 @@
+name: CI
+
+# Full pre-merge gate. Build is included deliberately: `tsc -b && vite build` catches
+# breakage that `test` and `tsc --noEmit` miss (e.g. a stray key in vite.config.ts).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:run
+      - run: npm run build

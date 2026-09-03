@@ -18,7 +18,7 @@ import type { RoutePath } from './pathfind';
 function makeGrid(): FeatureCollection {
   const lon = (i: number) => 12.5 + i * 0.002;
   const lat = (j: number) => 55.68 + j * 0.002;
-  const features: any[] = [];
+  const features: FeatureCollection["features"] = [];
   for (let j = 0; j < 3; j++) {
     features.push({
       type: 'Feature',

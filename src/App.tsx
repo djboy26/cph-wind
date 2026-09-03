@@ -3,7 +3,8 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState } from "re
 import type { ErrorInfo, ReactNode } from "react";
 import DeckGL from "@deck.gl/react";
 import { PathLayer, ScatterplotLayer, PolygonLayer } from "@deck.gl/layers";
-import { WebMercatorViewport } from "@deck.gl/core";
+import { WebMercatorViewport, Layer } from "@deck.gl/core";
+import type { PickingInfo } from "@deck.gl/core";
 import { Map as MapLibreMap } from "react-map-gl/maplibre";
 import type * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -22,6 +23,12 @@ import SegmentTooltip from "./components/SegmentTooltip";
 import RoutePanel from "./components/RoutePanel";
 import About from "./components/About";
 import OnboardingHint from "./components/OnboardingHint";
+import TimeSlider from "./components/TimeSlider";
+import AdvisoryChip from "./components/Advisory";
+import { cyclingAdvisory } from "./cyclist/advisory";
+import { bestRideWindow } from "./cyclist/bestWindow";
+import { reportError } from "./monitoring";
+import { Analytics } from "@vercel/analytics/react";
 import { glass, COLORS } from "./components/ui";
 import "./components/ui.css";
 
@@ -75,7 +82,10 @@ function applyDaylight(map: maplibregl.Map) {
   for (const l of layers) {
     const id = l.id.toLowerCase();
     const set = (prop: string, val: unknown) => {
-      try { map.setPaintProperty(l.id, prop as any, val as any); } catch { /* layer lacks prop */ }
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        map.setPaintProperty(l.id, prop as any, val as any);
+      } catch { /* layer lacks prop */ }
     };
     try {
       if (l.type === "background") { set("background-color", THEME.land); continue; }
@@ -172,14 +182,18 @@ function useWindowSize() {
   return size;
 }
 
-class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+class ErrorBoundary extends Component<{ children: ReactNode; silent?: boolean }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("Uncaught error:", error, info);
+    reportError(error);
   }
   render() {
     if (this.state.error) {
+      // `silent` isolates a non-essential subtree (e.g. analytics): report it, but
+      // render nothing rather than replacing the app with an error card.
+      if (this.props.silent) return null;
       return (
         <div style={{
           padding: 32, fontFamily: "system-ui", maxWidth: 600, margin: "60px auto",
@@ -188,7 +202,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
           <h2 style={{ color: "#c00", marginTop: 0 }}>Something broke</h2>
           <p>{this.state.error.message}</p>
           <p style={{ fontSize: 13, color: "#666" }}>
-            Refresh the page to retry. If it keeps happening, the data files may be missing — open the browser console for details.
+            Refresh the page to retry. If it keeps happening, the data files may be missing. Open the browser console for details.
           </p>
           <button
             onClick={() => location.reload()}
@@ -264,13 +278,28 @@ function MapApp() {
     COPENHAGEN.lat, COPENHAGEN.lon,
   );
 
+  // Forecast time scrubbing: 0 = now. The selected step's wind drives everything.
+  const [forecastIdx, setForecastIdx] = useState(0);
+  const forecast = useMemo(() => windResult?.forecast ?? [], [windResult]);
+  const activeWind = useMemo(
+    () => forecast[Math.min(forecastIdx, forecast.length - 1)]?.wind ?? windResult?.wind ?? null,
+    [forecast, forecastIdx, windResult],
+  );
+  const activeConditions = useMemo(
+    () => forecast[Math.min(forecastIdx, forecast.length - 1)]?.conditions ?? windResult?.conditions ?? null,
+    [forecast, forecastIdx, windResult],
+  );
+  // Conditions chip (ice/gusts/severe wind/heavy rain) for the selected hour, and a
+  // "ride later?" nudge over the next few hours.
+  const advisory = useMemo(() => cyclingAdvisory(activeWind, activeConditions), [activeWind, activeConditions]);
+  const rideWindow = useMemo(() => bestRideWindow(forecast), [forecast]);
+
   const [roads, setRoads] = useState<FeatureCollection | null>(null);
   // Viewport-tiled segments: a manifest of which tiles exist, a cache of decoded
-  // tiles, an in-flight guard, and a version counter that bumps as tiles arrive.
+  // tiles, and an in-flight guard.
   const [tileManifest, setTileManifest] = useState<TileManifest | null>(null);
-  const tileCacheRef = useRef<Map<string, RawSegment[]>>(new Map());
+  const [tileCache, setTileCache] = useState<Record<string, RawSegment[]>>({});
   const tileInflightRef = useRef<Set<string>>(new Set());
-  const [tileVersion, setTileVersion] = useState(0);
   const [buildings, setBuildings] = useState<BuildingRow[] | null>(null);
   const buildingsReq = useRef(false);
   const [dataError, setDataError] = useState<Error | null>(null);
@@ -323,18 +352,26 @@ function MapApp() {
 
   useEffect(() => () => workerRef.current?.terminate(), []);
 
-  // Ask the worker for routes whenever the endpoints or live wind change.
+  // Ask the worker for routes whenever the endpoints or the selected-time wind change.
   useEffect(() => {
     if (!routing || !workerRef.current) return;
-    if (!start || !end || !windResult) {
-      setRouteOptions([]);
-      setRouteComputing(false);
+    if (!start || !end || !activeWind) {
+      Promise.resolve().then(() => {
+        setRouteOptions([]);
+        setRouteComputing(false);
+      });
       return;
     }
-    const reqId = ++reqIdRef.current;
-    setRouteComputing(true);
-    workerRef.current.postMessage({ type: "plan", reqId, start, end, wind: windResult.wind });
-  }, [routing, start, end, windResult]);
+    // Debounce: scrubbing the forecast slider changes activeWind on every tick;
+    // without this we'd post a fresh A* job to the worker each time. Coalesce to the
+    // settled value (~150ms) — imperceptible for the start/end case too.
+    const timer = setTimeout(() => {
+      const reqId = ++reqIdRef.current;
+      setRouteComputing(true);
+      workerRef.current!.postMessage({ type: "plan", reqId, start, end, wind: activeWind });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [routing, start, end, activeWind]);
 
   // Rank by the rider's chosen criterion; the winner is the highlighted "best".
   const { sorted: rankedRoutes, bestId } = useMemo(
@@ -444,11 +481,15 @@ function MapApp() {
         .then((r) => { if (!cancelled) setRoads(r); })
         .catch((e) => { if (!cancelled) console.warn("Roads failed to load:", e); });
     };
-    const ric = (window as any).requestIdleCallback;
+    const win = window as unknown as {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const ric = win.requestIdleCallback;
     const id = ric ? ric(load, { timeout: 3000 }) : window.setTimeout(load, 1200);
     return () => {
       cancelled = true;
-      const cic = (window as any).cancelIdleCallback;
+      const cic = win.cancelIdleCallback;
       if (ric && cic) cic(id); else window.clearTimeout(id as number);
     };
   }, []);
@@ -470,8 +511,8 @@ function MapApp() {
     if (!roads) return new Map<string, string>();
     const m = new Map<string, string>();
     for (const f of roads.features) {
-      const p: any = f.properties || {};
-      if (p.name && p.id) m.set(String(p.id), p.name);
+      const p = (f.properties || {}) as Record<string, string | number | undefined>;
+      if (p.name && p.id) m.set(String(p.id), String(p.name));
     }
     return m;
   }, [roads]);
@@ -513,32 +554,31 @@ function MapApp() {
   }, [density, windowSize.width, windowSize.height, viewState.longitude, viewState.latitude, viewState.zoom, viewState.pitch, viewState.bearing]);
 
   // Fetch the segment tiles covering the current viewport (skip empty/loaded/in-flight
-  // ones), decode them, and bump tileVersion so the wind field rebuilds as they land.
+  // ones), decode them, and update tileCache so the wind field rebuilds as they land.
   useEffect(() => {
     if (!tileManifest || !boundsKey) return;
     const [west, south, east, north] = boundsKey.split(",").map(Number);
     for (const key of tileKeysForBounds(tileManifest, west, south, east, north)) {
       if (!tileManifest.tiles.has(key)) continue;
-      if (tileCacheRef.current.has(key) || tileInflightRef.current.has(key)) continue;
+      if (tileCache[key] || tileInflightRef.current.has(key)) continue;
       tileInflightRef.current.add(key);
       fetch(`/data/segtiles/${key}.json`)
         .then((r) => { if (!r.ok) throw new Error(`Tile ${key} ${r.status}`); return r.json(); })
         .then((arr: SegTuple[]) => {
-          tileCacheRef.current.set(key, arr.map(decodeSeg));
+          setTileCache((prev) => ({ ...prev, [key]: arr.map(decodeSeg) }));
           tileInflightRef.current.delete(key);
-          setTileVersion((v) => v + 1);
         })
         .catch((e) => { tileInflightRef.current.delete(key); console.warn("Tile load failed:", e); });
     }
-  }, [tileManifest, boundsKey]);
+  }, [tileManifest, boundsKey, tileCache]);
 
   const flowLines = useMemo<FlowLine[]>(() => {
-    if (!tileManifest || !windResult || !boundsKey || density === "hidden") return [];
+    if (!tileManifest || !activeWind || !boundsKey || density === "hidden") return [];
     const [west, south, east, north] = boundsKey.split(",").map(Number);
     // Gather streets from the loaded tiles intersecting the view, clipped to bounds.
     let visible: RawSegment[] = [];
     for (const key of tileKeysForBounds(tileManifest, west, south, east, north)) {
-      const segs = tileCacheRef.current.get(key);
+      const segs = tileCache[key];
       if (!segs) continue;
       for (const s of segs) {
         if (s.lon >= west && s.lon <= east && s.lat >= south && s.lat <= north) visible.push(s);
@@ -550,9 +590,8 @@ function MapApp() {
       const stride = Math.ceil(visible.length / cap);
       visible = visible.filter((_, i) => i % stride === 0);
     }
-    return buildFlowField(visible, windResult.wind);
-    // tileVersion in deps so the field rebuilds as tiles arrive.
-  }, [tileManifest, windResult, density, boundsKey, isMobile, tileVersion]);
+    return buildFlowField(visible, activeWind);
+  }, [tileManifest, activeWind, density, boundsKey, isMobile, tileCache]);
 
   // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
   // footprints would choke the GPU. boundsKey already snaps to a coarse grid, so
@@ -594,7 +633,7 @@ function MapApp() {
   // Routes + endpoints draw on TOP of the wind arrows. Also kept off the per-frame
   // path so the route polylines aren't rebuilt while arrows animate.
   const routeLayers = useMemo(() => {
-    const result: any[] = [];
+    const result: Layer[] = [];
     if (routing && rankedRoutes.length > 0) {
       // Draw unselected first, selected last so it sits on top.
       const ordered = [...rankedRoutes].sort(
@@ -615,22 +654,22 @@ function MapApp() {
           capRounded: true,
           jointRounded: true,
           pickable: true,
-          onClick: (info: any) => { if (info.object) { setSelectedRouteId(info.object.id); return true; } return false; },
+          onClick: (info: PickingInfo<RouteOption>) => { if (info.object) { setSelectedRouteId(info.object.id); return true; } return false; },
           updateTriggers: { getColor: `${selectedRoute?.id}|${bestId}`, getWidth: selectedRoute?.id },
         }),
       );
     }
     if (routing && (start || end)) {
       const pts = [
-        start && { pos: [start.lon, start.lat], color: [40, 160, 90] },
-        end && { pos: [end.lon, end.lat], color: [210, 50, 50] },
+        start && { pos: [start.lon, start.lat] as [number, number], color: [40, 160, 90] as [number, number, number] },
+        end && { pos: [end.lon, end.lat] as [number, number], color: [210, 50, 50] as [number, number, number] },
       ].filter(Boolean) as { pos: [number, number]; color: [number, number, number] }[];
       result.push(
         new ScatterplotLayer({
           id: "route-endpoints",
           data: pts,
-          getPosition: (d: any) => d.pos,
-          getFillColor: (d: any) => d.color,
+          getPosition: (d: typeof pts[number]) => d.pos,
+          getFillColor: (d: typeof pts[number]) => d.color,
           getRadius: 7,
           radiusUnits: "pixels",
           radiusMinPixels: 6,
@@ -671,12 +710,12 @@ function MapApp() {
 
   // "Loaded" = the tile manifest is in and the first viewport tile has decoded
   // (wind is on screen). Roads + further tiles stream in afterwards.
-  const stillLoading = !tileManifest || tileVersion === 0;
+  const stillLoading = !tileManifest || Object.keys(tileCache).length === 0;
   const showWindError = windError && !windResult;
   const showDataError = dataError && stillLoading;
   const activeTip = pinned ?? hover;
 
-  const onMapClick = useCallback((info: any) => {
+  const onMapClick = useCallback((info: PickingInfo) => {
     if (routing && info.coordinate) {
       const [lon, lat] = info.coordinate;
       setSelectedRouteId(null);
@@ -704,14 +743,32 @@ function MapApp() {
         zIndex: 25,
       }
     : { position: "absolute", top: 78, left: 14, zIndex: 25 };
+  // The forecast slider lives at the bottom (centre on desktop, full-width on mobile),
+  // hidden while a route sheet owns the bottom on mobile.
+  const showSlider = !stillLoading && forecast.length > 1 && !(routing && isMobile);
+
   const legendStyle: React.CSSProperties = isMobile
     ? {
         position: "absolute",
-        bottom: pinned ? 200 : "calc(env(safe-area-inset-bottom) + 10px)",
+        // Sit clear above the (full-width) forecast strip when it's shown.
+        bottom: pinned ? 200 : `calc(env(safe-area-inset-bottom) + ${showSlider ? 118 : 10}px)`,
         left: "calc(env(safe-area-inset-left) + 10px)",
         zIndex: 20,
       }
     : { position: "absolute", bottom: 16, right: 16, zIndex: 20 };
+
+  const sliderStyle: React.CSSProperties = isMobile
+    ? {
+        position: "absolute",
+        bottom: "calc(env(safe-area-inset-bottom) + 10px)",
+        left: "calc(env(safe-area-inset-left) + 8px)",
+        right: "calc(env(safe-area-inset-right) + 8px)",
+        zIndex: 22,
+      }
+    // Bottom-LEFT on desktop — the opposite corner from the wind-scale legend, so the
+    // two never overlap at any width. (Centring it with translateX(-50%) also fought
+    // the ui-up entry animation, which resets transform and shoved it right.)
+    : { position: "absolute", bottom: 16, left: 14, zIndex: 22 };
 
   return (
     <div className="app-root" style={{ position: "relative", background: THEME.land, overflow: "hidden" }}>
@@ -737,7 +794,8 @@ function MapApp() {
       </DeckGL>
 
       <TopBar
-        wind={windResult?.wind ?? null}
+        wind={activeWind}
+        tempC={activeConditions?.tempC}
         timestamp={windResult?.timestamp}
         loading={windLoading && !windResult}
         routingActive={routing}
@@ -746,12 +804,14 @@ function MapApp() {
         isMobile={isMobile}
       />
 
-      {/* Transient status chips, centered just under the bar */}
-      <div style={{ position: "absolute", top: isMobile ? "calc(env(safe-area-inset-top) + 58px)" : 76, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 8, zIndex: 20, pointerEvents: "none" }}>
+      {/* Transient status chips + the conditions advisory, centered just under the
+          bar. Column layout so they stack instead of overlapping. */}
+      <div style={{ position: "absolute", top: isMobile ? "calc(env(safe-area-inset-top) + 58px)" : 76, left: 0, right: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 8, zIndex: 20, pointerEvents: "none" }}>
         {showDataError && <div className="ui-fade" style={statusChip(COLORS.bad)}>Data error: {dataError!.message}</div>}
         {showWindError && <div className="ui-fade" style={statusChip(COLORS.bad)}>Wind error: {windError!.message}</div>}
         {stillLoading && !dataError && <div className="ui-fade" style={statusChip(COLORS.dim)}>Loading streets…</div>}
         {windLoading && !windResult && !stillLoading && <div className="ui-fade" style={statusChip(COLORS.dim)}>Loading wind…</div>}
+        {!stillLoading && !showWindError && !showDataError && advisory && <AdvisoryChip advisory={advisory} />}
       </div>
 
       {routing && (
@@ -790,6 +850,20 @@ function MapApp() {
         </div>
       )}
 
+      {showSlider && (
+        <div className="ui-up" style={sliderStyle}>
+          <TimeSlider
+            steps={forecast}
+            index={forecastIdx}
+            onChange={setForecastIdx}
+            isMobile={isMobile}
+            lat={COPENHAGEN.lat}
+            lon={COPENHAGEN.lon}
+            rideWindow={rideWindow}
+          />
+        </div>
+      )}
+
       {!stillLoading && <OnboardingHint isMobile={isMobile} />}
 
       {activeTip && (
@@ -820,9 +894,15 @@ function MapApp() {
 
 export default function App() {
   return (
-    <ErrorBoundary>
-      <MapApp />
-    </ErrorBoundary>
+    <>
+      <ErrorBoundary>
+        <MapApp />
+      </ErrorBoundary>
+      {/* Non-essential: isolated so a hiccup in analytics can never blank the app. */}
+      <ErrorBoundary silent>
+        <Analytics />
+      </ErrorBoundary>
+    </>
   );
 }
 

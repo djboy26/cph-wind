@@ -132,7 +132,7 @@ export default function SegmentTooltip({
         </div>
         {impact.alongMs < 0.5 ? (
           <div style={{ color: COLORS.dim }}>
-            Crosswind — little head/tailwind either way ({impact.alongMs.toFixed(1)} m/s along the street).
+            Crosswind. Little head or tailwind either way ({impact.alongMs.toFixed(1)} m/s along the street).
           </div>
         ) : (
           <>
