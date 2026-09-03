@@ -1,6 +1,6 @@
 // src/cyclist/routeCopy.test.ts
 import { describe, it, expect } from "vitest";
-import { formatWindDelta, verdictFor, type BestWindow } from "./routeCopy";
+import { formatWindDelta, verdictFor, forecastNote, type BestWindow } from "./routeCopy";
 import type { RouteOption } from "../routing/windRoute";
 
 /** A route carrying only the three metrics the copy reads. */
@@ -128,5 +128,39 @@ describe("verdictFor", () => {
   it("says nothing when there are no routes", () => {
     expect(verdictFor([], false, null)).toBe("");
     expect(verdictFor([], true, window)).toBe("");
+  });
+});
+
+describe("forecastNote", () => {
+  const now = new Date(2026, 8, 3, 14, 20); // 3 Sep 2026, 14:20 local
+
+  it("names the hour the times were computed for", () => {
+    expect(forecastNote(new Date(2026, 8, 3, 16, 0), now)).toBe(
+      "Times below use the 16:00 forecast.",
+    );
+  });
+
+  it("returns null when there is no selected hour", () => {
+    expect(forecastNote(null, now)).toBeNull();
+  });
+
+  it("returns null when the selected hour is the current hour", () => {
+    // Same hour, different minute: still "now", so there is nothing to label.
+    expect(forecastNote(new Date(2026, 8, 3, 14, 0), now)).toBeNull();
+    expect(forecastNote(new Date(2026, 8, 3, 14, 59), now)).toBeNull();
+  });
+
+  it("labels the same clock hour on a different day", () => {
+    expect(forecastNote(new Date(2026, 8, 4, 14, 0), now)).toBe(
+      "Times below use the 14:00 forecast.",
+    );
+  });
+
+  it("pads to HH:mm and returns null on an invalid date", () => {
+    expect(forecastNote(new Date(2026, 8, 3, 9, 0), now)).toBe(
+      "Times below use the 09:00 forecast.",
+    );
+    expect(forecastNote(new Date("nonsense"), now)).toBeNull();
+    expect(forecastNote(new Date(2026, 8, 3, 16, 0), new Date("nonsense"))).toBeNull();
   });
 });

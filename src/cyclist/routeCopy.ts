@@ -42,6 +42,31 @@ export function formatWindDelta(seconds: number): string {
     : `${MINUS}${durationPhrase(seconds)} with the wind`;
 }
 
+/** Same clock format the TimeSlider uses: "16:00". */
+function clockLabel(d: Date): string {
+  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Floor a date to its hour, so "same hour" ignores minutes. */
+function hourStamp(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime();
+}
+
+/**
+ * Route times are computed for whichever forecast hour the TimeSlider is on, so
+ * they stop being a function of the current wind as soon as the rider scrubs.
+ * Say which hour they used — but only when it is not the hour we are in, since
+ * labelling "now" as a forecast is noise.
+ *
+ * Returns null when there is nothing to say.
+ */
+export function forecastNote(selectedHour: Date | null, now: Date): string | null {
+  if (!selectedHour || Number.isNaN(selectedHour.getTime())) return null;
+  if (Number.isNaN(now.getTime())) return null;
+  if (hourStamp(selectedHour) === hourStamp(now)) return null;
+  return `Times below use the ${clockLabel(selectedHour)} forecast.`;
+}
+
 /** The hour bestRideWindow() picked, as a local clock label like "16:00". */
 export interface BestWindow {
   at: string;

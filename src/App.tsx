@@ -27,6 +27,7 @@ import TimeSlider from "./components/TimeSlider";
 import AdvisoryChip from "./components/Advisory";
 import { cyclingAdvisory } from "./cyclist/advisory";
 import { bestRideWindow } from "./cyclist/bestWindow";
+import { forecastNote } from "./cyclist/routeCopy";
 import type { BestWindow } from "./cyclist/routeCopy";
 import { reportError } from "./monitoring";
 import { Analytics } from "@vercel/analytics/react";
@@ -378,6 +379,16 @@ function MapApp() {
   const { sorted: rankedRoutes, bestId, windIsSimilar } = useMemo(
     () => rankRoutes(routeOptions, criterion),
     [routeOptions, criterion],
+  );
+
+  // Route times follow the TimeSlider, so say which hour they used when it is not
+  // the hour we are in.
+  const routeForecastNote = useMemo(
+    () => {
+      const step = forecast[Math.min(forecastIdx, forecast.length - 1)];
+      return forecastNote(step ? new Date(step.time) : null, new Date());
+    },
+    [forecast, forecastIdx],
   );
 
   // The verdict names the better hour, so it needs a clock label rather than an
@@ -851,6 +862,7 @@ function MapApp() {
             onCriterion={setCriterion}
             windIsSimilar={windIsSimilar}
             bestWindow={bestWindow}
+            forecastNote={routeForecastNote}
             isMobile={isMobile}
           />
         </div>

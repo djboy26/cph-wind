@@ -46,6 +46,8 @@ interface Props {
   windIsSimilar: boolean;
   /** A better hour to ride, if bestRideWindow() found one. */
   bestWindow: BestWindow | null;
+  /** "Times below use the 16:00 forecast." — null when the selected hour is now. */
+  forecastNote: string | null;
   isMobile: boolean;
 }
 
@@ -66,12 +68,6 @@ const sheet: CSSProperties = {
   WebkitBackdropFilter: "none",
 };
 
-const rule: CSSProperties = {
-  height: 1,
-  background: COLORS.line,
-  margin: "14px 0",
-};
-
 const quietControl: CSSProperties = {
   border: "none",
   background: "transparent",
@@ -86,7 +82,7 @@ export default function RoutePanel({
   onPickStart, onPickEnd, onClearStart, onClearEnd, onSwap,
   gpsLoading, gpsError,
   onUseGps, onReset, options, selectedId, onSelect,
-  criterion, onCriterion, windIsSimilar, bestWindow, isMobile,
+  criterion, onCriterion, windIsSimilar, bestWindow, forecastNote, isMobile,
 }: Props) {
   if (!active) {
     return (
@@ -165,7 +161,9 @@ export default function RoutePanel({
         </button>
       )}
 
-      <div style={rule} />
+      {forecastNote && (
+        <div style={{ fontSize: 12, color: COLORS.dim, marginBottom: 10 }}>{forecastNote}</div>
+      )}
 
       <div>
         {options.map((o, i) => (
@@ -198,7 +196,7 @@ export default function RoutePanel({
                   fontWeight: 600,
                   letterSpacing: "-0.025em",
                   lineHeight: 1,
-                  color: i === 0 ? COLORS.accent : COLORS.text,
+                  color: o.id === selectedId ? COLORS.accent : COLORS.text,
                 }}
               >
                 {fmtMin(o.metrics.timeS)}

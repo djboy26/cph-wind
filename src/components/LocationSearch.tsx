@@ -101,13 +101,15 @@ export default function LocationSearch({
 
   return (
     <div style={{ position: "relative" }}>
-      {/* Waypoint row, measured in PLAN.md step 4: an unboxed row separated from
-          the route list by a rule, not a field inside a card inside the sheet. */}
+      {/* Waypoint row, measured in PLAN.md step 4. The hairline underline (4b) says
+          "field" without reintroducing a container; unboxed, these read as static
+          text rather than something you can tap. */}
       <div
         style={{
           display: "flex", alignItems: "center", gap: 10,
-          padding: "5px 0",
+          padding: "5px 0 8px",
           background: "transparent",
+          borderBottom: `1px solid ${COLORS.line}`,
         }}
       >
         <span style={{ width: 7, height: 7, borderRadius: "50%", background: dot, flex: "0 0 auto", boxShadow: `0 0 0 3px ${dotRing}` }} />
