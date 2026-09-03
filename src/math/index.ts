@@ -125,7 +125,8 @@ export function alongStreetWind(streetBearingDeg: number, wind: Wind): AlongStre
  * direction and modified magnitude.
  *
  * - λ = H/W is the canyon aspect ratio.
- * - λ < 0.1:   ambient wind returned unchanged (open / very wide street).
+ * - λ < 0.1:   open / very wide street: no canyon transform, but the
+ *              boundary-layer reduction still applies.
  * - λ ≈ 0.36:  Copenhagen median — ~48% of cross-component blocked.
  * - λ ≳ 0.65:  skimming-flow regime — cross-component largely blocked, so the
  *              street-level wind aligns strongly with the street axis.
@@ -136,6 +137,13 @@ export function alongStreetWind(streetBearingDeg: number, wind: Wind): AlongStre
  * made every street read the same direction). This is what makes a wind-aligned
  * street flow fast-and-straight while a perpendicular street goes calm.
  *
+ * The ambient 10 m wind is brought down to rider height by streetLevelWind()
+ * before anything else happens, so every factor below is relative to the
+ * street-level wind, not to the 10 m reference. The along factor tops out at
+ * 1.45, so the result peaks at 0.6 × 1.45 = 0.87 of ambient: channeling makes
+ * the along component *less reduced* than the cross component, it never lifts
+ * street-level wind above the open-terrain value.
+ *
  * Reference: Soulhac, Salizzoni, Cierco, Perkins (2008), Atmos Env 42(31).
  */
 export function canyonModifiedWind(
@@ -145,11 +153,27 @@ export function canyonModifiedWind(
 ): Wind {
   const lambda = canyon.widthM > 0 ? canyon.heightM / canyon.widthM : 0;
 
-  if (lambda < 0.1 || ambientWind.speedMs <= 0) return ambientWind;
+  // The single point where the 10 m → rider-height reduction is applied on the
+  // canyon path. resistance() and alongStreetWind() each apply it themselves and
+  // neither of them calls this function, so it lands exactly once per code path.
+  // Anything that starts routing through canyonModifiedWind must drop its own
+  // streetLevelWind() call or the wind ends up at 0.36 × ambient.
+  const v = streetLevelWind(ambientWind.speedMs);
+
+  // Open or very wide street: no channeling, but the rider is still at 1.5 m,
+  // not 10 m. Returning ambientWind raw here left ~16% of central segments on
+  // the old, unreduced wind.
+  if (lambda < 0.1 || ambientWind.speedMs <= 0) {
+    return {
+      speedMs: v,
+      directionDeg: ambientWind.directionDeg,
+      gustMs: ambientWind.gustMs !== undefined ? streetLevelWind(ambientWind.gustMs) : undefined,
+    };
+  }
 
   const thetaTravel = ((ambientWind.directionDeg + 180) % 360) * DEG;
-  const Wx = ambientWind.speedMs * Math.sin(thetaTravel);
-  const Wy = ambientWind.speedMs * Math.cos(thetaTravel);
+  const Wx = v * Math.sin(thetaTravel);
+  const Wy = v * Math.cos(thetaTravel);
 
   const thetaStreet = streetBearingDeg * DEG;
   const Sx = Math.sin(thetaStreet);

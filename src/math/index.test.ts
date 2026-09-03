@@ -8,7 +8,9 @@ import {
   offsetLonLat,
   computeSegmentLanes,
   computeSegmentCenterWind,
+  canyonModifiedWind,
   type SegmentInput,
+  type CanyonGeometry,
 } from './index';
 
 // Copenhagen city hall — used as a real-world reference point for bearing tests
@@ -161,7 +163,7 @@ describe('computeSegmentLanes', () => {
     expect(lanes[0].speedMs).not.toBeCloseTo(lanes[4].speedMs, 0);
   });
 
-  it('open field (no buildings): returns ambient-like speeds', () => {
+  it('open field (no buildings): returns the boundary-layer-reduced ambient', () => {
     const seg = baseSegment({
       leftHeightM: 0,
       rightHeightM: 0,
@@ -169,7 +171,10 @@ describe('computeSegmentLanes', () => {
     });
     const lanes = computeSegmentLanes(seg, northWind);
     for (const lane of lanes) {
-      expect(lane.speedMs).toBeCloseTo(10, 1);
+      // 10 m/s at the 10 m met reference is 6 m/s at rider height. Before step 2a
+      // this path returned the raw 10 m value, which is what made the map arrows
+      // and the route panel disagree.
+      expect(lane.speedMs).toBeCloseTo(6, 1);
     }
   });
 
@@ -179,5 +184,99 @@ describe('computeSegmentLanes', () => {
     const center = computeSegmentCenterWind(seg, northWind);
     expect(center.speedMs).toBeCloseTo(lanes[2].speedMs, 5);
     expect(center.flowDeg).toBeCloseTo(lanes[2].flowDeg, 5);
+  });
+});
+// ---------------------------------------------------------------------------
+// Step 2a: the canyon model must not manufacture energy. Street-level wind
+// inside an urban canopy should never exceed the open-terrain 10 m reference.
+// ---------------------------------------------------------------------------
+
+describe('canyonModifiedWind — energy budget', () => {
+  const LAMBDAS = [0, 0.1, 0.34, 0.65, 1.0, 1.5, 2.5];
+  const geom = (lambda: number): CanyonGeometry => ({ heightM: lambda * 20, widthM: 20 });
+
+  it('never returns more wind than the ambient it was given', () => {
+    const ambientSpeed = 8;
+    const offenders: string[] = [];
+    let worst = 0;
+
+    for (const lambda of LAMBDAS) {
+      for (let windDeg = 0; windDeg < 360; windDeg += 10) {
+        for (let streetDeg = 0; streetDeg < 360; streetDeg += 10) {
+          const out = canyonModifiedWind(streetDeg, geom(lambda), {
+            speedMs: ambientSpeed,
+            directionDeg: windDeg,
+          });
+          const ratio = out.speedMs / ambientSpeed;
+          if (ratio > worst) worst = ratio;
+          if (out.speedMs > ambientSpeed + 1e-9) {
+            offenders.push(
+              `λ=${lambda} street=${streetDeg}° wind=${windDeg}° -> ` +
+                `${out.speedMs.toFixed(3)} m/s (${ratio.toFixed(3)}× ambient)`,
+            );
+          }
+        }
+      }
+    }
+
+    expect(
+      offenders.length,
+      `${offenders.length} of ${LAMBDAS.length * 36 * 36} combinations exceed ambient ` +
+        `(worst ${worst.toFixed(3)}× ambient). First few:\n${offenders.slice(0, 6).join('\n')}`,
+    ).toBe(0);
+  });
+});
+
+describe('canyonModifiedWind — boundary layer', () => {
+  // An aligned street: bearing 0 (N-S) with the wind coming from the north, so
+  // the whole vector is along-canyon and the along factor acts undiluted.
+  // λ = 0.34 is the measured Copenhagen median. alongFactor = 1 + 0.3 × 0.34
+  // = 1.102, so the answer is 3.9 × 0.6 × 1.102 = 2.579 m/s. Before the fix this
+  // returned 3.9 × 1.102 = 4.298 m/s — above the ambient it was given.
+  it('scales an aligned median canyon to 2.58 m/s, not 4.30', () => {
+    const out = canyonModifiedWind(
+      0,
+      { heightM: 6.8, widthM: 20 },
+      { speedMs: 3.9, directionDeg: 0 },
+    );
+    expect(out.speedMs).toBeCloseTo(2.58, 2);
+    expect(Math.abs(out.speedMs - 2.58)).toBeLessThanOrEqual(0.01);
+    expect(out.speedMs).not.toBeCloseTo(4.3, 1); // the pre-fix value
+  });
+
+  it('reduces on the λ < 0.1 early-return path instead of returning raw ambient', () => {
+    const ambient = { speedMs: 7, directionDeg: 215, gustMs: 12 };
+    // widthM 100 / heightM 4 gives λ = 0.04: wide enough that no canyon transform
+    // applies, which is ~16% of central segments.
+    const out = canyonModifiedWind(35, { heightM: 4, widthM: 100 }, ambient);
+    expect(out.speedMs).toBeCloseTo(4.2, 6); // 7 × 0.6, not 7
+    expect(out.speedMs).not.toBeCloseTo(ambient.speedMs, 1);
+    expect(out.directionDeg).toBeCloseTo(215, 6); // no channeling, so no rotation
+    expect(out.gustMs).toBeCloseTo(7.2, 6); // gust reduced by the same factor
+
+    // Zero-width geometry takes the same path (λ falls back to 0).
+    expect(canyonModifiedWind(35, { heightM: 0, widthM: 0 }, ambient).speedMs).toBeCloseTo(4.2, 6);
+  });
+
+  it('agrees with resistance() on an aligned street once channeling is removed', () => {
+    // λ just under the 0.1 cutoff means no canyon transform, so the canyon path
+    // and the routing path should now see the same street-level wind. This is the
+    // gap step 2a closes; the residual difference at real λ is the channeling.
+    const ambient = { speedMs: 6, directionDeg: 0 };
+    const canyon = canyonModifiedWind(0, { heightM: 1, widthM: 100 }, ambient);
+    const router = resistance(0, ambient); // aligned street, pure headwind
+    expect(canyon.speedMs).toBeCloseTo(Math.abs(router.headwindMs), 9);
+  });
+
+  it('applies streetLevelWind exactly once per code path', () => {
+    // A double application would land at 0.36 × ambient rather than 0.6 ×.
+    const ambient = { speedMs: 10, directionDeg: 0 };
+    const open = canyonModifiedWind(0, { heightM: 0, widthM: 20 }, ambient);
+    expect(open.speedMs).toBeCloseTo(6, 9);
+    expect(open.speedMs).not.toBeCloseTo(3.6, 1);
+
+    // resistance() and alongStreetWind() reduce on their own and must not also
+    // route through the canyon model, or they would compound.
+    expect(Math.abs(resistance(0, ambient).headwindMs)).toBeCloseTo(6, 9);
   });
 });
