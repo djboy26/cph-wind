@@ -609,8 +609,27 @@ scale was absolute; the shelter framing surfaced it.
 
 ## Step 4 — Rebuild `RoutePanel.tsx`
 
-Reference mockup: the published "Route Panel Redesign" artifact. Do step 3 first — the
-recalibrated bands change what the panel renders. Same data, 22 numbers down to 7.
+Panel only. Map work moved to step 5. Steps 1–3c are done, so the numbers this renders are final.
+Same data as today, **22 numbers down to 7**.
+
+**Do not invent copy or layout.** Every string and every measurement below is specified. Where this
+spec gives a number, use that number. Where it gives a sentence, use that sentence verbatim —
+these were written against a rendered mockup you cannot see, and paraphrasing them will lose the
+thing they were tuned for. If something here is impossible or contradictory, stop and say so rather
+than substituting your own judgement.
+
+### Make the copy testable
+
+Layout cannot be unit-tested and should not be faked. The *decisions* can be. Extract them as pure
+functions in `src/cyclist/` with tests, so the component holds only markup:
+
+```ts
+formatWindDelta(seconds: number): string
+verdictFor(opts: RouteOption[], windIsSimilar: boolean, best: BestWindow | null): string
+```
+
+That is the line: anything that chooses a word or a number gets a test; anything that positions a
+pixel gets a screenshot.
 
 ### Remove
 
@@ -628,15 +647,15 @@ recalibrated bands change what the panel renders. Same data, 22 numbers down to 
 - **`windDeltaS` as the wind figure.** (Numbers will shift once step 2 lands; that is expected.)
 -  `routeMetrics()` already computes it at line 79 and the UI
   has never rendered it. Format as `+35 s into the wind` / `−40 s with the wind`.
-- **A verdict sentence** below the list, driven by `windIsSimilar` and, once step 0 has landed,
-  by `bestRideWindow()`:
+- **A verdict sentence** below the list, driven by `windIsSimilar` and `bestRideWindow()`
+  (both already shipped). Use these three strings exactly:
   - `windIsSimilar === false` → *"The short way costs you an extra 1 min 47 s today. Go round."*
   - `windIsSimilar === true` and `bestRideWindow()` returns null →
     *"Wind costs about 35 s whichever way you go today. Take the short one."*
   - `windIsSimilar === true` and `bestRideWindow()` returns a window →
     *"Wind costs about 35 s whichever way you go. Leave at 16:00 and it costs nothing."*
 
-  That third case is the important one and it is why step 0 comes first. **When wind does not
+  That third case is the important one. **When wind does not
   discriminate between routes it often still discriminates between hours**, and on a 1.4 km trip
   where every route costs the same, *when to leave* is the better answer than *which way to go*.
   `bestRideWindow()` already computes it, with a conservative 1.2-unit improvement threshold so it
@@ -645,13 +664,39 @@ recalibrated bands change what the panel renders. Same data, 22 numbers down to 
   The `TimeSlider` also means route metrics are no longer a function of current wind alone. Take the
   wind for the selected forecast hour, not `useCurrentWind()`, and label the panel when the selected
   hour is not "now".
-- **A footer line** showing the active rider default: `Commuter bike, 18 km/h`, tappable (step 4).
+- **A footer line**, two quiet text controls, 12 px, muted, 16 px apart:
+  `Sort by wind` and `Commuter bike, 18 km/h`. The second is inert until step 6 — render it, do not
+  wire it.
 
-### Layout
+### `formatWindDelta` — exact strings
 
-Each row: time at 24 px / 600 weight on the left, distance small and grey on the right, wind delta
-beneath the time at 12.5 px. `font-variant-numeric: tabular-nums` throughout. Rows separated by
-`1px solid var(--hairline)`, no border on the last.
+| input | output |
+|---|---|
+| `+35` | `+35 s into the wind` |
+| `+107` | `+1 min 47 s into the wind` |
+| `-40` | `−40 s with the wind` (U+2212 minus, not a hyphen) |
+| `\|x\| < 5` | `no wind either way` |
+
+### Layout — exact values
+
+```
+sheet padding            18px 18px 16px
+waypoint row             13.5px, dot 7px, gap 10px, padding 5px 0
+rule under waypoints     1px var(--line), margin 14px 0
+
+route row                padding 13px 0, border-bottom 1px var(--hairline)
+                         last row: no border
+  time                   24px / 600 / letter-spacing -0.025em / line-height 1
+  distance               13px, COLORS.faint, right-aligned, baseline-aligned with time
+  wind delta             12.5px, COLORS.dim, margin-top 5px, beneath the time
+  first row time         COLORS.accent — that is the only colour in the list
+
+verdict                  13.5px / line-height 1.5, margin-top 14px,
+                         padding-top 13px, border-top 1px var(--line)
+footer                   12px, COLORS.faint, gap 16px, margin-top 14px
+```
+
+`font-variant-numeric: tabular-nums` (the `NUM` object in `ui.ts`) on every number.
 
 ### Surface
 
@@ -662,11 +707,45 @@ where nothing has to be read at length.
 
 Keep Inter. The typeface is the least important part of this change.
 
+### Screenshot checkpoint
+
+Stop after the component builds and `npm run check` passes. Do not proceed to polish. The user
+takes phone screenshots of three states — no route, calm day (`windIsSimilar` true), and a state
+where wind discriminates — and those decide whether it is done.
+
 ---
 
-## Step 5 — Bike-type picker
+## Step 5 — Map legibility and honesty
 
-Only after steps 1-4. Sets `baseSpeedMs` and `windSensitivity` together in `CyclingParams`:
+Three things step 3c left behind, all map-side. Small, and they travel together because they touch
+the same two files.
+
+**1. Glyph legibility.** Adjacent bands are ΔE 7.7 apart, which reads clearly in a 20 px legend
+swatch and marginally on an 8 px anti-aliased arrow over a light basemap. The palette is finished;
+the remaining lever is size and decimation. `FlowLineLayer.sizeForSpeed()` clamps to 3–9.5 px —
+widen the range and check density at zoom 13 as well as 16.
+
+**2. Make the dual encoding deliberate.** After 3c the map encodes *shelter* in colour and *absolute
+strength* in size. That is the right pair and it happened by accident. Write it down in a comment in
+`FlowLineLayer.ts` so nobody "fixes" the size function to use the ratio too and collapses the two
+channels into one.
+
+**3. The `Open` band is telling two stories.** Measured on the shipped tiles, of everything in the
+Open band (λ < 0.1): `measured` 0.7%, `partial` 6.4%, **`fallback` 92.9%**. So "About the open-air
+wind at street level" also means "we could not measure this street", across roughly a quarter of the
+map. `geometrySource` is already on every segment and already reaches `SegmentTooltip`. Say it in
+the tooltip — one line, something like *"No building data here — treated as open."* Do not split the
+band; the colour is right, the claim just needs a caveat where it is guessed.
+
+Also fix the stale comment above `ROUTE_IMPACTS` while in `windCategory.ts`: it still says the scale
+matches `ui.ts` "so the panel and the map agree on what a headwind looks like", which 3b deliberately
+reversed.
+
+---
+
+## Step 6 — Bike-type picker
+
+Only after steps 1–5. Sets `baseSpeedMs` and `windSensitivity` together in `CyclingParams`:
 
 | type | baseSpeedMs | windSensitivity |
 |---|---|---|
