@@ -85,9 +85,22 @@ function normalize(seg: RawSegment): SegmentInput {
   };
 }
 
-// Bolder arrow for stronger wind (metres; clamped so it stays readable).
+// TWO CHANNELS, DELIBERATELY. Colour carries SHELTER — street / ambient, a ratio,
+// "which streets are sheltered today" (windBandColor + shelterRatio, above). Size
+// carries ABSOLUTE STRENGTH in m/s, "how much wind is actually on this street".
+//
+// They answer different questions and a rider needs both: a deeply sheltered street
+// on a gale day still has real wind in it, and an open street on a calm day does not.
+// Do NOT "fix" this function to take the ratio as well. That collapses the map to one
+// channel and drops absolute strength, which since step 3c is shown nowhere else on
+// the map — only in the tooltip.
+//
+// The range is a FIRST GUESS, derived from the post-3c speed distribution (street
+// level runs roughly 0.25x to 0.72x of ambient) and not from looking at the map. It
+// roughly doubles the usable spread, so six colour bands are no longer drawn across
+// about three pixels of size difference. Expect a second pass once screenshots exist.
 function sizeForSpeed(speedMs: number): number {
-  return Math.max(3, Math.min(9.5, 2.6 + speedMs * 0.95));
+  return Math.max(4, Math.min(14, 3.2 + speedMs * 1.5));
 }
 
 /** Wind-direction arrows spread along each street; each drifts (bounded) in flowDeg. */

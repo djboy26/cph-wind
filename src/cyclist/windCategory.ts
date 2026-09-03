@@ -131,11 +131,13 @@ export interface RouteImpactBand {
 // Diverging teal ↔ rust about a light neutral midpoint, matching COLORS.good/bad in
 // ui.ts. It deliberately shares no colour with WIND_BANDS above: this scale is signed
 // along-route m/s and means direction, that one is a shelter ratio and means magnitude,
-// and both are on screen at once — see the collision gate in windCategory.test.ts. Bounds
-// here are m/s and stay absolute. The old green
-// arm against the orange/red arm collapsed under deuteranopia: strong tailwind vs
-// severe headwind — the two extremes — measured OKLab ΔE 5.0, i.e. the same colour.
-// Here the worst tailwind-vs-headwind pair measures 13.3 and adjacent pairs clear 9.9.
+// and both are on screen at once — see the collision gate in windCategory.test.ts.
+// Bounds here are m/s and stay absolute.
+//
+// The old green arm against the orange/red arm collapsed under deuteranopia: strong
+// tailwind vs severe headwind — the two extremes — measured OKLab ΔE 5.0, i.e. the
+// same colour. Here the worst tailwind-vs-headwind pair measures 13.3 and adjacent
+// pairs clear 9.9.
 export const ROUTE_IMPACTS: RouteImpactBand[] = [
   { key: "strong_tailwind", label: "Strong tailwind", minMs: -Infinity, maxMs: -5, color: [0, 90, 112] },
   { key: "tailwind", label: "Tailwind", minMs: -5, maxMs: -2, color: [68, 136, 156] },

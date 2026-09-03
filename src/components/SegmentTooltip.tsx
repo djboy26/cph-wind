@@ -125,6 +125,14 @@ export default function SegmentTooltip({
           <Chip color={strength.color} label={strength.label} />
         </span>
       </div>
+      {/* 92.9% of the Open band is fallback geometry, so "about the open-air wind"
+          silently doubles as "we could not measure this street". Say which one it is,
+          next to the claim rather than buried in the cross-section footer. */}
+      {geometrySource === "fallback" && (
+        <div style={{ fontSize: 11, color: COLORS.dim, marginBottom: 2 }}>
+          No building data here — treated as open.
+        </div>
+      )}
       {showGust && (
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
           <span style={{ color: COLORS.dim }}>Gusting to</span>
