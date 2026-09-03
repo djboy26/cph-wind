@@ -473,6 +473,101 @@ map now deliberately shares no colours with the panel. One line, fix it when tha
 
 ---
 
+## Step 3c — Colour the map by shelter, not absolute speed
+
+Chosen by the user 2026-09-03 after seeing step 3b live. **The palette is fine; the thresholds
+answer the wrong question.**
+
+### Why
+
+Step 3's bands were calibrated against Copenhagen's year-round wind distribution. The map never
+shows a year — it shows one ambient at a time, where the only variables are street orientation and
+canyon depth. Measured on the real 5,110-segment central network, that spread is **fixed at 2.83×
+regardless of wind speed**:
+
+| ambient | p5 | median | p95 | spread | bands on screen |
+|---|---|---|---|---|---|
+| 2.0 m/s | 0.50 | 1.16 | 1.43 | 2.83× | 2 |
+| 4.4 m/s | 1.11 | 2.56 | 3.15 | 2.83× | 3 |
+| 7.0 m/s | 1.77 | 4.08 | 5.00 | 2.83× | 4 |
+| 11.0 m/s | 2.77 | 6.40 | 7.86 | 2.83× | 5 |
+
+At the live 4.4 m/s, 92.2% of arrows fell in two adjacent bands. The map correctly showed one
+colour.
+
+The ratio `streetSpeed / ambientSpeed` has the same distribution every day, because geometry fixes
+it: p5 0.252, median 0.582, p95 0.715, identical at 2 m/s and 11 m/s. **A scale over ratio uses its
+full range daily.**
+
+The map answers "which streets are sheltered". The header already answers "how windy is it", and
+`cyclist/advisory.ts` already carries absolute hazard as its own chip, so no safety signal depends
+on arrow colour.
+
+### The 0.60 reference
+
+`0.60` is an open street — `URBAN_BL_CORRECTION` with no canyon. **16.2% of central segments sit
+exactly there** (the λ < 0.1 early return). Below 0.60 the canyon blocks wind; above it, the canyon
+channels wind along the street. That is the physical story the app has always claimed and never
+shown. Cuts must not split the 0.60 mode.
+
+### Changes — `src/cyclist/windCategory.ts`
+
+1. Add `shelterRatio(streetSpeedMs, ambientSpeedMs)`. Guard `ambientSpeedMs < 0.1` by returning
+   `0.60` (the open-street reference) rather than dividing by ~zero.
+2. `windBand()` and `windBandColor()` take the **ratio**, not a speed. Rename the type's numeric
+   bounds accordingly — they are no longer m/s.
+3. Cuts `0.35 / 0.48 / 0.58 / 0.63 / 0.70`, measured against the real network pooled over 24 wind
+   directions:
+
+| band | ratio | share | blurb |
+|---|---|---|---|
+| Deeply sheltered | < 0.35 | 13.2% | Buildings block almost all of today's wind. |
+| Sheltered | 0.35–0.48 | 19.5% | Well shielded; you will barely feel it. |
+| Partly sheltered | 0.48–0.58 | 18.0% | Some shelter from the buildings. |
+| Open | 0.58–0.63 | 29.1% | About the open-air wind at street level. |
+| Channelled | 0.63–0.70 | 14.8% | The street funnels wind along its axis. |
+| Strongly channelled | > 0.70 | 5.4% | Buildings accelerate the wind down this street. |
+
+4. **Keep the indigo colours exactly as committed in 3b.** They are validated and unchanged.
+5. `ROUTE_IMPACTS` unchanged — it is signed along-route m/s and stays absolute.
+
+### Consumers — all three must be updated
+
+| file | line | change |
+|---|---|---|
+| `layers/buildWindArrows.ts` | 128 | `windBandColor(shelterRatio(lane.speedMs, wind.speedMs))` — `wind` is already in scope at line 114 |
+| `components/SegmentTooltip.tsx` | 58 | needs a **new prop** `ambientSpeedMs: number`, passed from `App.tsx`. Show both: the absolute `modifiedSpeedMs` in m/s *and* the shelter band. The tooltip is where absolute strength belongs. |
+| `components/Legend.tsx` | 23, 43 | the legend is now meaningless without the reference. Head it `Shelter · relative to N.N m/s now`, so it needs the ambient too. |
+
+Fix the stale comment above `ROUTE_IMPACTS` while you are in the file (see step 3b notes).
+
+### Acceptance
+
+```
+scale invariance:
+  windBand(shelterRatio(2.64, 4.4)) === windBand(shelterRatio(6.0, 10.0))   // both 0.60
+
+open-street reference:
+  shelterRatio(0.6*A, A) lands in the "Open" band for every A in [1..15]
+
+zero guard:
+  shelterRatio(0, 0) does not throw, returns 0.60
+
+occupancy on the REAL network (public/data/segtiles, 24 wind directions):
+  no band below 4% or above 35%
+```
+
+Pin the occupancy test against the shipped tile data, not a synthetic distribution. That is what
+went wrong the first time.
+
+### Expect
+
+The map should show four to six distinct indigo shades in one view at any wind speed, and the
+pattern should be legible as structure: sheltered courtyard streets pale, wind-aligned arterials
+dark. Screenshot before and after at the same Nørrebro view.
+
+---
+
 ## Step 4 — Rebuild `RoutePanel.tsx`
 
 Reference mockup: the published "Route Panel Redesign" artifact. Do step 3 first — the
