@@ -384,6 +384,67 @@ noted in a comment as the pre-step-2a calibration
 Take a before and after screenshot of the same Nørrebro view. The map should regain visible
 structure — right now it reads as two colours.
 
+## Step 3b — Correct the map ramp (follow-on from step 3)
+
+Step 3 landed as `2c73ef3` on `fix/wind-scale-calibration`. The thresholds and the diverging panel
+scale are **correct and should stay**. The map ramp has two measured defects.
+
+The agent replaced the six-hue map ramp with a single-hue rust sequential ramp. That principle is
+right — wind strength is ordered magnitude, so order belongs in lightness, and the old ramp was not
+even monotonic (Moderate OKLab L 0.764 against Calm 0.638). Keep the principle. Fix the hue and the
+light end.
+
+**1. Contrast.** Arrows are ~8 px glyphs on white roads (`#ffffff`) over warm land (`#f2ede2`).
+WCAG 1.4.11 requires 3:1 for graphical objects.
+
+| band | current | vs white road |
+|---|---|---|
+| Calm | `#ccab98` | **2.13:1** |
+| Light | `#c3896a` | **2.95:1** |
+
+Those two bands are 48.2% of the map. Roughly half the arrows sit below the floor.
+
+**2. Semantic collision.** The map ramp encodes magnitude; `ROUTE_IMPACTS` encodes direction. They
+are now the same colours:
+
+| panel | map | ΔE |
+|---|---|---|
+| Headwind `#b66947` | Moderate `#b76740` | **0.8** |
+| Strong headwind `#9f431d` | Strong `#a34820` | **1.4** |
+
+A rust arrow on the map does not mean headwind. Both meanings appear on screen together.
+
+### Change
+
+Keep `ROUTE_IMPACTS` exactly as committed — the diverging teal ↔ rust about a light neutral is
+correct. Move the **map** ramp to indigo, which avoids water (teal), parks (green) and the panel's
+rust:
+
+```
+Calm         [130, 142, 202]   #828eca   3.15:1
+Light        [106, 118, 185]   #6a76b9   4.28:1
+Moderate     [ 83,  94, 168]   #535ea8   5.94:1
+Strong       [ 62,  70, 150]   #3e4696   8.33:1
+Very strong  [ 43,  45, 133]   #2b2d85  11.56:1
+Severe       [ 27,  15, 115]   #1b0f73  15.41:1
+```
+
+Monotonic lightness, adjacent ΔE 7.7, min ΔE to panel rust **19.1** (was 0.8).
+
+### Acceptance
+
+```
+every WIND_BANDS colour >= 3.0:1 against #ffffff        // WCAG 1.4.11, arrows are graphics
+min OKLab dE from any WIND_BANDS colour to any
+  ROUTE_IMPACTS headwind colour >= 12                   // magnitude must not read as direction
+WIND_BANDS OKLab lightness strictly decreasing
+adjacent WIND_BANDS dE >= 7
+```
+
+Pin these as tests. They are the gates the first pass missed, and they are cheap to check.
+
+---
+
 ## Step 4 — Rebuild `RoutePanel.tsx`
 
 Reference mockup: the published "Route Panel Redesign" artifact. Do step 3 first — the
