@@ -860,19 +860,23 @@ spec got wrong, both mine:
 
 **`sizeForSpeed()` returns metres, not pixels.** `createFlowLineLayer` sets `sizeUnits: 'meters'`
 with `sizeMinPixels: 6` (8 on phones) and `sizeMaxPixels: 28`. The whole step 5 table above is
-labelled "px" and is wrong. At Copenhagen's latitude one pixel is 10.8 m at zoom 13, 1.35 m at 16,
-0.67 m at 17. Rendered size on a 4.4 m/s day (street p10 = 1.1 m/s, p90 = 3.17 m/s):
+labelled "px" and is wrong. deck.gl and MapLibre define zoom on 512 px tiles, so at Copenhagen's
+latitude one pixel is 5.4 m at zoom 13, 0.67 m at 16, 0.34 m at 17 (a first draft of this
+paragraph used the 256 px convention and had every figure twice too large — corrected 2026-09-04).
+Rendered size on a 4.4 m/s day (street p10 = 1.1 m/s, p90 = 3.17 m/s):
 
 | zoom | m/px | before step 5 | after step 5 |
 |---|---|---|---|
-| 13 – 16 | 10.8 – 1.35 | 6.0 – 6.0 px | 6.0 – 6.0 px |
-| 17 | 0.67 | 6.0 – 8.3 px | 7.2 – 11.8 px |
-| 18 | 0.34 | 10.8 – 16.7 px | 14.4 – 23.6 px |
+| 13 – 15 | 5.4 – 1.35 | 6.0 – 6.0 px | 6.0 – 6.0 px |
+| 16 | 0.67 | 6.0 – 8.3 px | 7.2 – 11.8 px |
+| 17 | 0.34 | 10.8 – 16.7 px | 14.4 – 23.6 px |
+| 18 | 0.17 | 21.7 – 28 px | 28 – 28 px (cap) |
 
-Every arrow from zoom 13 to 16 sits on the 6 px floor, before and after. The size channel is dead
-across the four zoom levels a rider actually uses, and a 6 px anti-aliased arrow is where the
-ΔE 7.7 band separation stops reading. The screenshots show exactly that: specks at 13.5 and 15.5,
-readable arrows only at 17.5.
+Every arrow from zoom 13 to 15 sits on the 6 px floor, before and after; at 16 the channel was
+marginal before and step 5 opened it; at 18 step 5 pushed everything onto the 28 px cap. Below
+zoom 16 the size channel is dead, and a 6 px anti-aliased arrow is where the ΔE 7.7 band
+separation stops reading. The screenshots show exactly that: specks at 13.5 and 15.5, readable
+arrows only at 17.5.
 
 **`arrowDensityForZoom` is only half wired.** `App.tsx` consumes `'hidden'` and nothing else;
 `'single'` and `'multi'` are computed and ignored, and `buildFlowField` always emits
@@ -965,6 +969,13 @@ against Positron's white streets — at and below the WCAG 3 : 1 line for graphi
 arrows vanish on the real map, the fix is a darker top of the ramp with the ΔE gate in
 `windCategory.test.ts` re-run, as its own step. Not before it has been seen.
 
+
+### Completed 2026-09-04 — commit `4a73847`
+
+Pixel units, density wired, static single-arrow field, chip header fixed, dead layer deleted.
+Reviewed against the branch and re-run here: green. Superseded a few hours later by step 5c —
+DJ's screenshots of it showed the remaining problem, which is placement, not size.
+
 ---
 
 ## Step 4c — The verdict is wrong on tailwind days, and the forecast note fires on "Now"
@@ -1041,6 +1052,92 @@ The bike label stays — step 6 turns it into the picker.
 control), a route with the slider scrubbed one hour ahead (note present), and — if the day
 allows — a tailwind verdict.
 
+
+### Completed 2026-09-04 — commit `c054a8c`
+
+Diff read line by line against the table above: rows A–F and the clause rules are implemented as
+written, `recommendedOrder` is computed once in `App.tsx` and is what the verdict reads,
+`bestWindow.deltaS` comes from `routeMetrics()` on the main thread, the forecast note is gated on
+`forecastIdx > 0` and on `options.length > 0`, and "Sort by wind" hides below two routes. Lint,
+tests and build green with the step 5c patch applied on top (127 tests).
+
+---
+
+## Step 5c — One arrow per screen cell: the lattice
+
+DJ's screenshots of step 5b on the real basemap, 2026-09-04: arrows pile up at junctions and
+bends and thin out on long straights. One cause — three arrows per road segment whatever its
+length, so a 6 m stub at a junction gets the same three as a 40 m straight, and parallel OSM
+cycleways add three more. DJ's brief, verbatim: *constant spacing and density, organised,
+structured, side by side; smaller arrows if needed.* The reference he sent is a regular grid.
+
+**This step was built and rendered before it was written.** The patch at the repo root,
+`step5c.patch`, is the implementation that produced the renders described below; it applies
+cleanly on `c054a8c` and passes `npm run check` (127 tests) and `npm run build` there. The job in
+auto mode is to apply it, verify, and commit — not to re-derive it.
+
+```
+git apply --3way step5c.patch
+rm step5c.patch
+npm run check && npm run build
+git add -A && git commit
+```
+
+`--3way` applies against the committed blobs, so the CRLF working tree on Windows does not
+matter. If it reports conflicts, `git checkout -- .`, stop and report; do not hand-merge.
+
+### What it does
+
+**Placement.** `buildFlowField(segments, wind, { spacingM, onRoad })` in `FlowLineLayer.ts`.
+Every segment offers candidate points every half `spacingM` along its axis (at least its centre).
+Candidates are binned into square cells `spacingM` wide in local metres, and the candidate nearest
+each cell's centre wins. One rule, two regimes: zoomed out, cells are larger than segments and the
+field thins to one arrow per cell; zoomed in, cells are smaller than segments and arrows run along
+each road one cell apart. Junctions and parallel cycleways share cells, so they never pile up. The
+count is bounded by the cells in view — about 800 on a desktop, 200 on a phone — so the 650 / 1700
+street cap and its index stride are deleted.
+
+`spacingM = ARROW_SPACING_PX × metres-per-pixel`, `ARROW_SPACING_PX = 40`, computed in `App.tsx`
+from the zoom quantised to quarter levels (`zoomQ`), with the 512 px tile constant:
+`78271.517 × cos(lat) / 2^zoom`.
+
+**Lattice below zoom 16, road above.** `onRoad = density === "multi"`. Below 16 the arrow is drawn
+at its cell centre — a true grid, rows and columns, as in the reference — carrying the wind of the
+nearest street (never more than half a cell away, 27 m at zoom 15). From 16 up the arrow sits on
+the road it stands for, because buildings are drawn and an arrow on a roof would be a lie.
+
+**Nothing moves.** The drift-and-fade conveyor is gone: `boundedTravel`, `travelLenM`, `FADE`,
+`fracOf`, `arrowPosition(d, time)` all deleted, and `getPosition` drops out of `updateTriggers`.
+Direction is animated as a brightness wave travelling downwind through the lattice:
+`alpha = 0.7 + 0.3 · (0.5 + 0.5 · sin(2π (phase − t · RATE)))`, where `phase` is the arrow's
+position along the ambient wind vector in wavelengths (`WAVELENGTH_CELLS = 6`), `RATE = 0.25`
+cycles/s. No arrow is ever fainter than 0.7, so none "goes missing" in a still frame — the fade
+was what made the 5b field look gap-toothed.
+
+**Size.** `clamp(10 + 1.6·v, 10, 18)` px, plus 2 on phones. 18 px is under half the 40 px pitch, so
+neighbours never touch whatever way the wind blows. 1.1 m/s → 11.8 px, 3.17 → 15.1, ≥ 5 → 18.
+
+**Tests** (`FlowLineLayer.test.ts`, replacing the 5b density cases): a 200 m street on a 40 m
+pitch yields 5 or 6 arrows one pitch apart; two parallel streets 8 m apart draw once; a 5 m stub
+still gets one arrow; 500 segments inside one cell collapse to one; `onRoad` keeps `lon/lat` on
+the segment; the wave phase repeats every six cells; the ported direction test; the size clamp.
+
+### Rendered and judged
+
+Desktop 1440 × 900 at zoom 13.5, 14.5, 15.5, 16.5, 17.5 and a 390 px phone at 13, on a 4.4 m/s
+day. The lattice at 13 – 15.5 is exactly the reference: rows and columns, one arrow each, size
+and colour varying with the street beneath. At 16.5 and 17.5 the arrows follow the roads one pitch
+apart with no pile-ups. 32 px was also rendered: denser, arrows 6 – 13 px, too faint on the
+cream ground; 40 px is the default and `ARROW_SPACING_PX` is the one knob.
+
+### Acceptance
+
+`npm run check`, `npm run build`, push. Then DJ's three screenshots as before — the opening view,
+`=` ×3, `=` ×4 — judging two things only: whether the lattice reads as organised on the real
+streets, and whether the wave (which no still image shows) is calm enough. Knobs if not:
+`ARROW_SPACING_PX` (40), `ALPHA_MIN` (0.7), `RATE` (0.25), `WAVELENGTH_CELLS` (6). The tooltip
+caveat from step 5 stays parked until the arrows are settled.
+
 ---
 
 ## Step 6 — Bike-type picker
@@ -1101,7 +1198,7 @@ the distances should not.
 
 ## Merge order
 
-1. Steps 5b and 4c both go on `fix/map-legibility`. One PR to `main` when both are recorded here.
+1. Steps 5b, 4c and 5c all go on `fix/map-legibility`. One PR to `main` when all three are recorded here.
    `feat/route-panel-redesign` is a strict subset of it (verified 2026-09-04) — delete the branch
    after the merge, do not merge it separately.
 2. Step 6 starts from `main` after that merge, on `feat/bike-type`.
