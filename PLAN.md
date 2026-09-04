@@ -1212,6 +1212,43 @@ carries a five-row field filling the carriageway; side streets a single row one 
 sentence: field, or clutter. The knobs are `ARROW_SPACING_PX` (32), the two size constants, and
 `CROSS_FRACTION` (0.3).
 
+### Completed 2026-09-04 — commit `6c264ee`
+
+Applied with `git apply --3way step5d.patch` on `aa3476f`, the `fix/map-legibility` tip after the
+four `PLAN.md`-only commits were cherry-picked across from `feat/bike-type` (all four clean): all
+three files clean, no conflicts. `npm run check` green, `npm run build` clean. Pushed. The patch
+file was deleted before the commit and never committed.
+
+**130 tests** in this tree, across 11 files (was 127). The `npm run check` run itself
+printed 263: an untracked nested clone of the repo, `cph-wind/`, was sitting at the repo root
+(the reviewer's render checkout, dated 23:04) and vitest recursed into it and ran its 133
+tests in 12 files as well. Those are not this tree's tests. 130 comes from a second
+one-shot run of the same tree with `**/cph-wind/**` excluded, and 130 + 133 = 263.
+The clone was left exactly where it was found and nothing from it is committed. Delete it, or add
+`cph-wind/` to `.gitignore`, before the next run, or every count will be doubled again.
+
+**Changed beyond the patch: nothing.** Files in the commit, from `git show --stat`:
+
+```
+src/App.tsx                      |  4 ++--
+ src/layers/FlowLineLayer.test.ts | 36 ++++++++++++++++++++++++++++++++----
+ src/layers/FlowLineLayer.ts      | 39 +++++++++++++++++++++++----------------
+ 3 files changed, 57 insertions(+), 22 deletions(-)
+```
+
+The stale step 5b paragraph above `sizeForSpeed()` went with the patch, as its note says; the
+"Before the PR" housekeeping item was not repeated.
+
+**One thing out of order, recorded for honesty.** The first attempt to write this block failed on
+a wrong anchor in the recording script, and a flaw in how the commands were chained let item 5 run
+before that failure was acted on: `feat/bike-type` was rebased onto `6c264ee` and force-pushed as
+`ac684a2`, the four cherry-picked commits dropping as already upstream and only "Step 6: bike-type
+picker" remaining on top. That is exactly item 5's result, one step early, and nothing was
+half-done. Item 5 is repeated after this record so `feat/bike-type` carries it too.
+
+**Unverified visually:** the whole field. Pitch 32 px, arrows 14–22 px, rows across wide roads
+from zoom 17. DJ's three shots — opening view, `=`×3, `=`×4 — and one word: field, or clutter.
+
 ---
 
 ## Step 6 — Bike-type picker
