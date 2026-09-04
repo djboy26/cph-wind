@@ -1214,6 +1214,45 @@ Never gate the map behind the picker. Default first, adjust later.
 route re-planned as a road bike beside the same route as a city bike — the minutes should differ,
 the distances should not.
 
+### Completed 2026-09-04 — commit `09bcbd3`, branch `feat/bike-type`
+
+Cut from the tip of `fix/map-legibility` (`9db4071`), not from `main`, on instruction — `main` has
+not been merged. `npm run check` green, **133 tests** (was 127). `npm run build` clean. Pushed.
+`src/math/index.ts` untouched.
+
+**As specified.** `src/cyclist/bikeTypes.ts` carries the table as `BIKE_TYPES`, the `BikeType`
+union and `paramsFor(key)` spreading `DEFAULT_PARAMS`; `minSpeedMs` and `headwindThresholdMs` are
+untouched for every type. The `'plan'` message carries `params`, the worker passes it to
+`planRoutes`, and `bikeType` is in the plan effect's dependency list so a change re-plans. The
+step 4c re-pricing in `App.tsx` uses the same params. State is `useState<BikeType>(readStoredBikeType)`
+persisted under `cph-wind:bike` inside try/catch; missing, unknown or unreadable reads as
+`commuter`. The inert footer span is now a `quietControl` button reading `{label}, {km/h} km/h`
+which on tap swaps the footer row for the four type buttons, the active one in `COLORS.accent`,
+collapsing on a choice. The launcher's second line reads `Search, tap the map, or use GPS · Commuter`.
+The map is never gated on the picker.
+
+**Two readings of the spec, both mine, both small:**
+
+- The four expanded buttons sit in the existing 16 px-gap row with no "·" glyph between them; the
+  middots in the spec were read as list punctuation, matching the footer already shipped.
+- While the picker is open it replaces the whole footer row, "Sort by wind" included, as "swaps the
+  footer row" says; the sort control comes back on collapse.
+
+**Tests** (`bikeTypes.test.ts`, six): every type satisfies `minSpeedMs < baseSpeedMs < maxSpeedMs`;
+`paramsFor('commuter')` equals `DEFAULT_PARAMS`; only the three per-type fields differ from the
+default; the four keys appear once each in the table's order; the stored-value guard accepts the
+four keys and rejects null, empty, unknown, wrong-case and non-string values; the km/h labels are
+15 / 18 / 26 / 24. The `localStorage` round trip and the worker message live in `App.tsx` and the
+worker, which have no test harness.
+
+**Unverified visually — needs eyes on the Vercel preview:**
+
+1. Footer collapsed: `Commuter, 18 km/h` beside `Sort by wind`, same weight and colour as before.
+2. Footer expanded: four quiet buttons, the active one in accent, nothing else in the row.
+3. Choosing a type collapses the row and updates the launcher's second line.
+4. The same route re-planned as a road bike beside a city bike: minutes differ, distances do not.
+5. Reload keeps the choice; a private window falls back to Commuter without an error.
+
 ---
 
 ## Merge order
