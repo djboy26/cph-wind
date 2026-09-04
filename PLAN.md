@@ -1283,6 +1283,25 @@ the `// Pixels. 10 px is the smallest size …` paragraph directly below it. Kee
 block. `npm run check`, `npm run build`, commit "Drop the step 5b size comment", push. Then rebase
 `feat/bike-type` onto it (`git rebase fix/map-legibility`, force-push with `--force-with-lease`).
 
+### Run 2026-09-04 — stopped before item 0
+
+The routine assumes one `PLAN.md`. There are two. `fix/map-legibility`'s copy ends at the Step 5c
+record (`9db4071`); `feat/bike-type` carries the Step 6 record (`6aa2de0`) and the review notes
+committed directly before this note. Items 4–7 write to `PLAN.md` on `fix/map-legibility` in the
+regions those notes rewrote ("Merge order", the Step 5c record), and item 7's target for
+`feat/bike-type` exists only on `feat/bike-type`. Item 8 then rebases `feat/bike-type` onto that:
+a `PLAN.md` conflict is near-certain, and the routine forbids hand-merging.
+
+The review notes were also uncommitted when the run began. The routine's failure rule,
+`git checkout -- .`, would have discarded them at item 1, where checking out `fix/map-legibility`
+refuses a dirty `PLAN.md` that differs between the branches. They were committed first, unchanged,
+so nothing was lost. No code was touched; both branches are clean.
+
+To resume, either bring the two `PLAN.md`-only commits (`6aa2de0` and the review notes) onto
+`fix/map-legibility` so both branches hold the same document, then rerun the routine unchanged —
+item 8's rebase will then drop them as already upstream; or run items 4–7 on `feat/bike-type`
+after rebasing it, accepting that `fix/map-legibility`'s copy stays behind until it merges.
+
 ---
 
 ## Merge order
