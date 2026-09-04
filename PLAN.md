@@ -1158,6 +1158,14 @@ Cowork side (recorded above); nobody has seen it on the real basemap. DJ's three
 opening view, `=` ×3, `=` ×4 — judge whether the lattice reads as organised on real streets and
 whether the wave is calm enough.
 
+
+### Reviewed 2026-09-04
+
+`a63d4b2` is the patch byte for byte (only hunk offsets differ, from 4c landing first). Re-run
+here: 127 tests, lint, build. One thing the patch left behind, flagged by the agent: the comment
+above `sizeForSpeed()` now carries the step 5b paragraph ("8 px … 22 px … 'multi' density …")
+directly above the 5c one. Comment only; cleaned up under "Before the PR" below.
+
 ---
 
 ## Step 6 — Bike-type picker
@@ -1253,14 +1261,37 @@ worker, which have no test harness.
 4. The same route re-planned as a road bike beside a city bike: minutes differ, distances do not.
 5. Reload keeps the choice; a private window falls back to Commuter without an error.
 
+
+### Reviewed 2026-09-04
+
+Diff read in full; re-run here: 133 tests, lint, build. Rendered headless with the fixture
+geocoder: footer collapsed, footer expanded (four quiet buttons, active in accent), and the same
+Nørreport → Islands Brygge route re-planned three ways on a 6 m/s tailwind day — commuter
+7 / 8 / 9 min, road bike 5 / 6 / 6 min, city bike 8 / 10 / 11 min, distances 2.53 / 2.81 / 3.02 km
+unchanged throughout. Verdict row E ("The wind is with you today. Take the short one.") shown on
+the tailwind day, which was the case 4c was written to fix. Both of the agent's readings of the
+spec are accepted. Items 1–5 above stand for DJ's eyes; the reload case cannot be rendered here.
+
+---
+
+## Before the PR
+
+One housekeeping edit, on `fix/map-legibility` so both branches get it: in
+`src/layers/FlowLineLayer.ts`, delete the paragraph above `sizeForSpeed()` that begins
+`// Pixels, not metres.` and ends `// ≥ 6.4 → 22.` — six lines, step 5b's numbers, superseded by
+the `// Pixels. 10 px is the smallest size …` paragraph directly below it. Keep the `TWO CHANNELS`
+block. `npm run check`, `npm run build`, commit "Drop the step 5b size comment", push. Then rebase
+`feat/bike-type` onto it (`git rebase fix/map-legibility`, force-push with `--force-with-lease`).
+
 ---
 
 ## Merge order
 
-1. Steps 5b, 4c and 5c all go on `fix/map-legibility`. One PR to `main` when all three are recorded here.
-   `feat/route-panel-redesign` is a strict subset of it (verified 2026-09-04) — delete the branch
-   after the merge, do not merge it separately.
-2. Step 6 starts from `main` after that merge, on `feat/bike-type`.
+1. `fix/map-legibility` carries steps 4, 4b, 5, 5b, 4c and 5c. One PR to `main` once DJ has seen
+   the lattice on the real basemap. `feat/route-panel-redesign` is a strict subset of it (verified
+   2026-09-04) — delete the branch after the merge, do not merge it separately.
+2. `feat/bike-type` (step 6) was cut from the tip of `fix/map-legibility`, not from `main`. Second
+   PR, after the first has merged; it then rebases onto `main` cleanly.
 
 ## Verification before merge
 
