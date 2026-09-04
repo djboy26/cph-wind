@@ -92,6 +92,34 @@ describe('buildFlowField — one arrow per cell', () => {
   });
 });
 
+describe('buildFlowField — rows across wide roads', () => {
+  it('a wide street on the road gets rows one pitch apart each side, within 0.3 × canyon width', () => {
+    // 60 m canyon, 8 m pitch: 0.3 × 60 = 18 m → rows at 0, ±8, ±16 m (five rows).
+    const wide = seg({ bearingDeg: 0, segmentLengthM: 8, widthM: 60, leftDistM: 30, rightDistM: 30, canyonW: 60 });
+    const field = buildFlowField([wide], wind, { spacingM: 8, onRoad: true });
+    const cross = [...new Set(field.map((a) => a.baseCrossM))].sort((p, q) => p - q);
+    expect(cross).toEqual([-16, -8, 0, 8, 16]);
+  });
+
+  it('a 20 m residential canyon gets no extra rows until the pitch drops under 6 m', () => {
+    // 0.3 × 20 = 6 m. At 8 m and 16 m pitch (zoom ≤ 17.5) a single centreline row; at
+    // 4 m (zoom 18.5, the maximum) one row each side, 4 m out — still on the carriageway.
+    const narrow = seg({ bearingDeg: 0, segmentLengthM: 8, widthM: 20, leftDistM: 10, rightDistM: 10, canyonW: 20 });
+    for (const pitch of [8, 16]) {
+      const field = buildFlowField([narrow], wind, { spacingM: pitch, onRoad: true });
+      expect(field.every((a) => a.baseCrossM === 0)).toBe(true);
+    }
+    const close = buildFlowField([narrow], wind, { spacingM: 4, onRoad: true });
+    expect([...new Set(close.map((a) => a.baseCrossM))].sort((p, q) => p - q)).toEqual([-4, 0, 4]);
+  });
+
+  it('on the lattice there are no rows, whatever the width', () => {
+    const wide = seg({ bearingDeg: 0, segmentLengthM: 8, widthM: 60, leftDistM: 30, rightDistM: 30, canyonW: 60 });
+    const field = buildFlowField([wide], wind, { spacingM: 8, onRoad: false });
+    expect(field.every((a) => a.baseCrossM === 0)).toBe(true);
+  });
+});
+
 describe('buildFlowField — brightness wave', () => {
   it('phase advances by one wavelength every WAVELENGTH_CELLS (6) cells downwind', () => {
     // Wind from 270 blows toward 90 (east); a 480 m street due east crosses 12 cells.
@@ -126,12 +154,12 @@ describe('buildFlowField — direction', () => {
 });
 
 describe('buildFlowField — size', () => {
-  it('sizes in pixels on 10 + 1.6·v, clamped to 10..18', () => {
+  it('sizes in pixels on 14 + 1.6·v, clamped to 14..22', () => {
     // Open street: street wind is exactly 0.6 × ambient whatever the direction.
     const at = (ambient: number) =>
       buildFlowField([open()], { speedMs: ambient, directionDeg: 0 }, { spacingM: 40, onRoad: false })[0].sizePx;
-    expect(at(0)).toBe(10); //                     floor
-    expect(at(5)).toBeCloseTo(10 + 3.0 * 1.6, 9); // 3.0 m/s on the street → 14.8 px
-    expect(at(40)).toBe(18); //                    ceiling
+    expect(at(0)).toBe(14); //                     floor
+    expect(at(5)).toBeCloseTo(14 + 3.0 * 1.6, 9); // 3.0 m/s on the street → 18.8 px
+    expect(at(40)).toBe(22); //                    ceiling
   });
 });

@@ -32,6 +32,8 @@ export interface FlowLine {
   bearingDeg: number;
   /** Offset along the street (m) from the segment centre; 0 when on the lattice. */
   baseAlongM: number;
+  /** Offset across the street (m), + to the right of the bearing; 0 unless the road is wide. */
+  baseCrossM: number;
   color: [number, number, number];
   /** Arrow size in PIXELS (bigger = stronger wind) — the same at every zoom. */
   sizePx: number;
@@ -77,17 +79,12 @@ function normalize(seg: RawSegment): SegmentInput {
 // channel and drops absolute strength, which since step 3c is shown nowhere else on
 // the map — only in the tooltip.
 //
-// Pixels, not metres. A data glyph should encode the same value the same way at
-// every zoom; only a metre-sized glyph needs a zoom-dependent pixel clamp, and that
-// clamp is what flattened this channel before. 8 px is the smallest size at which
-// the arrowhead still resolves on a light ground; 22 px is where arrows start to
-// overlap at 'multi' density. Rendered: 1.1 m/s → 10.4 px, 3.17 → 15.0, 5 → 19,
-// ≥ 6.4 → 22.
-// Pixels. 10 px is the smallest size at which the arrowhead still reads on a light
-// ground; 18 px keeps the longest arrow under half the 40 px lattice pitch, so
-// neighbours never touch whatever way the wind blows.
+// Pixels. Sized like a quiver plot: the longest arrow is ~0.7 of the 32 px lattice
+// pitch, so the field reads as a field rather than as dots with gaps, and two
+// neighbours pointing along the same lattice axis still keep a 10 px gap.
+// 14 px is the smallest size at which the head still reads on a light ground.
 function sizeForSpeed(speedMs: number): number {
-  return Math.max(10, Math.min(18, 10 + speedMs * 1.6));
+  return Math.max(14, Math.min(22, 14 + speedMs * 1.6));
 }
 
 export interface FlowFieldOptions {
@@ -98,6 +95,8 @@ export interface FlowFieldOptions {
 }
 
 const M_PER_DEG_LAT = 111320;
+// How far across a wide street the extra rows may reach, as a fraction of canyon width.
+const CROSS_FRACTION = 0.3;
 
 /**
  * One arrow per grid cell. Every segment offers candidate points every `spacingM`
@@ -113,7 +112,7 @@ export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFie
   if (segments.length === 0 || !(spacingM > 0)) return [];
   const lat0 = segments[0].lat * DEG;
   const mPerDegLon = M_PER_DEG_LAT * Math.cos(lat0);
-  interface Cand { seg: SegmentInput; raw: RawSegment; alongM: number; d2: number; cx: number; cy: number }
+  interface Cand { seg: SegmentInput; raw: RawSegment; alongM: number; crossM: number; d2: number; cx: number; cy: number }
   const cells = new Map<string, Cand>();
   for (const raw of segments) {
     const seg = normalize(raw);
@@ -121,9 +120,16 @@ export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFie
     // Candidates every half cell so every cell a road crosses gets one; the nearest-to-centre
     // rule then keeps exactly one per cell.
     const n = Math.max(1, Math.round((2 * L) / spacingM));
-    for (let k = 0; k < n; k++) {
+    // On the road, a wide street gets extra rows one pitch apart on each side of the
+    // centreline, as far out as CROSS_FRACTION of the building-to-building width:
+    // three to five rows on a boulevard from zoom 17, one row on a 20 m residential
+    // canyon until the very last zoom level.
+    const rows = onRoad ? Math.floor((CROSS_FRACTION * seg.canyonW) / spacingM) : 0;
+    for (let k = 0; k < n; k++) for (let j = -rows; j <= rows; j++) {
       const alongM = ((k + 0.5) / n - 0.5) * L;
-      const p = offsetAlongBearing({ lon: seg.lon, lat: seg.lat }, seg.bearingDeg, alongM);
+      const crossM = j * spacingM;
+      const p0 = offsetAlongBearing({ lon: seg.lon, lat: seg.lat }, seg.bearingDeg, alongM);
+      const p = crossM === 0 ? p0 : offsetAlongBearing(p0, seg.bearingDeg + 90, crossM);
       const xM = p.lon * mPerDegLon;
       const yM = p.lat * M_PER_DEG_LAT;
       const cx = Math.floor(xM / spacingM);
@@ -133,7 +139,7 @@ export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFie
       const d2 = dx * dx + dy * dy;
       const key = cx + ',' + cy;
       const cur = cells.get(key);
-      if (!cur || d2 < cur.d2) cells.set(key, { seg, raw, alongM, d2, cx, cy });
+      if (!cur || d2 < cur.d2) cells.set(key, { seg, raw, alongM, crossM, d2, cx, cy });
     }
   }
   const travelRad = ((wind.directionDeg + 180) % 360) * DEG;
@@ -154,7 +160,7 @@ export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFie
     out.push({
       lon, lat,
       flowDeg: cw.flowDeg, bearingDeg: c.seg.bearingDeg,
-      baseAlongM: onRoad ? c.alongM : 0, color, sizePx, phase,
+      baseAlongM: onRoad ? c.alongM : 0, baseCrossM: onRoad ? c.crossM : 0, color, sizePx, phase,
       speedMs: cw.speedMs, gustMs: cw.gustMs,
       canyonH: c.seg.canyonH, canyonW: c.seg.canyonW,
       leftHeightM: c.seg.leftHeightM, rightHeightM: c.seg.rightHeightM,
@@ -166,7 +172,8 @@ export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFie
 
 function arrowPosition(d: FlowLine): [number, number] {
   // Anchored: on the lattice cell centre when zoomed out, on the road when zoomed in.
-  const p = offsetAlongBearing({ lon: d.lon, lat: d.lat }, d.bearingDeg, d.baseAlongM);
+  const along = offsetAlongBearing({ lon: d.lon, lat: d.lat }, d.bearingDeg, d.baseAlongM);
+  const p = d.baseCrossM === 0 ? along : offsetAlongBearing(along, d.bearingDeg + 90, d.baseCrossM);
   return [p.lon, p.lat];
 }
 

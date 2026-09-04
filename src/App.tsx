@@ -224,8 +224,8 @@ const BOUNDS_PAD = 0.25;
 const MAX_SPAN_DEG = 0.12;
 // Each street gets a few arrows whose positions are recomputed per frame on the CPU,
 // so cap how many streets we draw (thinned evenly across the view) to stay smooth.
-// Arrow lattice pitch in screen pixels: one arrow per 40 px cell at every zoom.
-const ARROW_SPACING_PX = 40;
+// Arrow lattice pitch in screen pixels: one arrow per 32 px cell at every zoom.
+const ARROW_SPACING_PX = 32;
 
 // --- Segment tiles (built by scripts/tile-segments.mjs; loaded per viewport) ---
 // Streets are split into a spatial grid so the phone downloads only what's in view
