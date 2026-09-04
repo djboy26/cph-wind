@@ -1138,6 +1138,26 @@ streets, and whether the wave (which no still image shows) is calm enough. Knobs
 `ARROW_SPACING_PX` (40), `ALPHA_MIN` (0.7), `RATE` (0.25), `WAVELENGTH_CELLS` (6). The tooltip
 caveat from step 5 stays parked until the arrows are settled.
 
+### Completed 2026-09-04 — commit `a63d4b2`
+
+Applied with `git apply --3way step5c.patch` on `84d35cc`: all three files clean, no conflicts.
+`npm run check` green, **127 tests** (was 123 — the 5b density cases are replaced by the eight
+lattice cases). `npm run build` clean. Pushed to `fix/map-legibility`. The patch file was deleted
+before the commit and was never committed.
+
+**Changed beyond the patch: nothing.**
+
+**One thing the patch carries, left exactly as shipped:** the comment block above
+`sizeForSpeed()` in `FlowLineLayer.ts` now holds two paragraphs that contradict each other. The
+hunk kept the 5b text as context ("8 px … 22 px … ≥ 6.4 → 22") and added the 5c paragraph
+("10 px … 18 px") beneath it. Comment only, so it cannot affect check or build, but the next edit
+of that file should delete the older paragraph.
+
+**Unverified visually:** everything this step changes. The lattice was rendered headless on the
+Cowork side (recorded above); nobody has seen it on the real basemap. DJ's three screenshots — the
+opening view, `=` ×3, `=` ×4 — judge whether the lattice reads as organised on real streets and
+whether the wave is calm enough.
+
 ---
 
 ## Step 6 — Bike-type picker
