@@ -1168,6 +1168,52 @@ directly above the 5c one. Comment only; cleaned up under "Before the PR" below.
 
 ---
 
+## Step 5d — Field density
+
+DJ on the 5c lattice, 2026-09-04: *"improvement for sure … I like that when I zoom in the arrows
+neatly fit inside the road geometry … however I need more arrows, neatly spaced. Think of vector
+arrows in physics, for magnetism or field representations."* Two things follow from a quiver
+plot: the pitch is tighter, and the arrow is long relative to the pitch — 0.5 to 0.7 — so the
+field reads as a field rather than as dots with gaps. 5c had 40 px pitch and arrows at 0.25 to
+0.45 of it.
+
+**Built and rendered first, as 5c was.** `step5d.patch` at the repo root is the implementation;
+it applies cleanly on `9db4071` (`fix/map-legibility`) and on `feat/bike-type`, and passes
+`npm run check` (130 tests) and `npm run build`. It also deletes the stale step 5b comment above
+`sizeForSpeed()`, so the housekeeping item under "Before the PR" is done by this patch and is not
+to be repeated.
+
+### What changes
+
+- `ARROW_SPACING_PX` 40 → **32**. 1.56× the arrows per area at every zoom; on a 390 px phone the
+  opening view is 12 columns, on a 1440 px desktop 45.
+- `sizeForSpeed` → `clamp(14 + 1.6·v, 14, 22)` px (+2 on phones). Longest arrow 22 px on a 32 px
+  pitch: 0.69, and two neighbours pointing along the same lattice axis keep a 10 px gap. 14 px is
+  where the head still reads on the light ground. 1.1 m/s → 15.8 px, 3.17 → 19.1, ≥ 5 → 22.
+- **Rows across wide roads**, on-road regime only. Each segment also offers candidates at lateral
+  offsets ±j·pitch for `j ≤ floor(0.3 × canyonW / pitch)` — `CROSS_FRACTION = 0.3` of the
+  building-to-building width, which is inside the carriageway for a Copenhagen boulevard. A 20 m
+  residential canyon gets nothing extra until the last zoom level (pitch < 6 m); a 50 m boulevard
+  gets three rows from zoom 17 and five at 18. `FlowLine` gains `baseCrossM`, applied in
+  `arrowPosition` along `bearingDeg + 90`. The lattice regime ignores it.
+- Tests: the size clamp updated; three new cases for the rows (wide street → `[-16, -8, 0, 8, 16]`
+  at 8 m pitch on a 60 m canyon; 20 m canyon → no rows at 8 and 16 m, `[-4, 0, 4]` at 4 m; lattice
+  regime → never).
+
+### Rendered and judged
+
+Desktop 13.5 / 14.5 / 15.5 / 16.5 / 17.5 and a 390 px phone at 13, 4.4 m/s day. The lattice is now
+a quiver plot: dense, regular, arrows two thirds of the pitch. At 17.5 H.C. Andersens Boulevard
+carries a five-row field filling the carriageway; side streets a single row one pitch apart.
+
+### Acceptance
+
+`npm run check`, `npm run build`, push. DJ's three shots, opening view / `=`×3 / `=`×4, and one
+sentence: field, or clutter. The knobs are `ARROW_SPACING_PX` (32), the two size constants, and
+`CROSS_FRACTION` (0.3).
+
+---
+
 ## Step 6 — Bike-type picker
 
 Only after 5b and 4c. Sets `baseSpeedMs` and `windSensitivity` together in `CyclingParams`:
@@ -1276,12 +1322,10 @@ spec are accepted. Items 1–5 above stand for DJ's eyes; the reload case cannot
 
 ## Before the PR
 
-One housekeeping edit, on `fix/map-legibility` so both branches get it: in
-`src/layers/FlowLineLayer.ts`, delete the paragraph above `sizeForSpeed()` that begins
-`// Pixels, not metres.` and ends `// ≥ 6.4 → 22.` — six lines, step 5b's numbers, superseded by
-the `// Pixels. 10 px is the smallest size …` paragraph directly below it. Keep the `TWO CHANNELS`
-block. `npm run check`, `npm run build`, commit "Drop the step 5b size comment", push. Then rebase
-`feat/bike-type` onto it (`git rebase fix/map-legibility`, force-push with `--force-with-lease`).
+~~One housekeeping edit: delete the stale step 5b paragraph above `sizeForSpeed()`.~~ **Done by
+the step 5d patch** — do not repeat it. What remains before the PR is the branch routine written
+into the auto-mode prompt of 2026-09-04 (evening): sync `PLAN.md` onto `fix/map-legibility` by
+cherry-pick, apply 5d there, record it, rebase `feat/bike-type` onto it.
 
 ### Run 2026-09-04 — stopped before item 0
 
