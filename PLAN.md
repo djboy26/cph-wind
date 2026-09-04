@@ -1414,6 +1414,68 @@ where he knows there are lanes; the same arrows in the same places after zooming
 
 ---
 
+## Step 5f — The road lattice: short arrows, side by side, all along
+
+DJ on 5e, with a scratch of the intent confirmed 2026-09-04 evening: *"the arrow length is
+ridiculously too long; I need multiple such arrows side by side."* The confirmed picture: short
+arrows of one length, several side by side across the carriageway, repeated all along it in a
+regular lattice, every one parallel to the wind. The lattice belongs to the road and never moves;
+only the arrows' direction comes from the wind.
+
+`step5f.patch` at the repo root is the implementation, built and rendered here; it applies
+cleanly on `6de9422` and on `feat/bike-type`; lint, 135 tests and the build pass. No data changes.
+
+**What it does** (`FlowLineLayer.ts`, replacing 5e's spanning arrows):
+
+- Every way carries a lattice in its own frame: points every `LATTICE_M = 3` m along it from its
+  first node (`startM` from the pipeline) and every 3 m across it from the centreline, out to the
+  carriageway edge less a 1.5 m margin (`roadWidthM`: class width, or half the canyon if wider,
+  never more than the canyon; 3.5 m for a cycleway). Zooming out keeps every *k*-th row and
+  column, `k = ceil(34 px / (3 m / mpp))`, so the on-screen pitch stays within a few pixels of
+  34 px at every zoom. Rows drop away as the road narrows on screen; positions never move — an
+  arrow is only ever drawn on a 3 m lattice point of its road.
+- Every arrow is the `arrow.svg` glyph at **22 px** (24 on phones): 0.65 of the pitch, so
+  lattice neighbours never touch whatever the wind does. The 5e shaft-and-head pair and
+  `public/arrowhead.svg` are gone.
+- Contention as in 5e, simplified because every arrow is the same length: one candidate per
+  34 px cell by rank (arterial > residential > cycleway > service, then the centre row, then
+  the lower way id, then the lower index), then every winner kept only if its centre is at least
+  0.75 × pitch from every kept centre. Deterministic.
+- Colour = shelter band, opacity = absolute strength, brightness wave — all unchanged from 5e.
+
+**Numbers.** Rows across at zoom 18.5 (3.4 m pitch, k = 2, 6 m): a 30 m boulevard carriageway
+carries five (±12 m), a 10 m residential street one (three at the last half-level, where k = 1).
+At zoom 16 (k = 5, 15 m) everything is a single row. At 13.5 (k = 43, 129 m) the arrows trace
+the network one every 34 px.
+
+**Tests** (`FlowLineLayer.test.ts`, rewritten): `roadWidthM` cases; rows across a 30 m
+carriageway at ±12 m; a 20 m residential canyon one row, three at 3 m pitch; a cycleway one row
+at every zoom; columns on the 3 m grid from the way start, every *k*-th; positions from the way
+not the piece; every arrow on a lattice point at three zooms; a cycleway beside its road adds
+nothing and the road keeps its lattice; input order irrelevant; minimum centre distance ≥ 0.75 ×
+pitch on a crossing grid at four zooms; one glyph size; opacity by speed; wave phase; direction.
+
+**Rendered.** Desktop 13.5 / 15.5 / 16.5 / 17.5 / 18.5 and a phone at 13. At 18.5 the boulevard
+is panel 2 of the scratch: rows across, columns along, all parallel. At 16.5 – 17.5 one row per
+street with two or three on the wide ones. At 13.5 the arrows trace the network.
+
+### Auto mode
+
+```
+git apply --3way step5f.patch && rm step5f.patch
+npm run check && npm run build
+git add -A && git commit
+```
+
+Also, in CLAUDE.md, put back the sentence the 5e edit dropped, at the end of the Data pipeline
+paragraph: "`segtiles/` is the tiled form the app loads." Same commit.
+
+### Acceptance
+
+DJ's four shots, opening view / `=`×3 / `=`×4 / maximum zoom on Amager Boulevard, against
+panel 2 of the scratch. Then the pitch: 34 as built, or 28, or 40 — one number.
+---
+
 ## The canyon model, reviewed 2026-09-04
 
 Prompted by DJ's question above. `canyonModifiedWind()` in `src/math/index.ts`, unchanged since
