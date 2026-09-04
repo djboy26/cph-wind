@@ -1249,6 +1249,178 @@ half-done. Item 5 is repeated after this record so `feat/bike-type` carries it t
 **Unverified visually:** the whole field. Pitch 32 px, arrows 14–22 px, rows across wide roads
 from zoom 17. DJ's three shots — opening view, `=`×3, `=`×4 — and one word: field, or clutter.
 
+### Reviewed 2026-09-04 — DJ's verdict: clutter; two causes found, one of them not the arrows
+
+DJ's phone screenshot at street zoom (Nørrebrogade / Ravnsborggade, 3.5 m/s from WSW):
+*"Road geometry not fully followed, not all roads have arrows. The wind direction matches the
+road direction in many many cases — is that correct or a lazy sloppy mistake?"*
+
+**Cause 1, missing roads — the data, not the layer.** `compute-cross-sections.mjs` cuts each OSM
+way at its own vertices and drops every piece shorter than 20 m. In dense Copenhagen a curve is
+digitised as many short chords and a junction as stubs, so those go. Measured on the shipped tiles
+in a 0.9 × 0.9 km box around the screenshot: **12.2 km of road, 10.1 km with any segment (83 %)**,
+21 of 186 ways with nothing at all, and the pieces that survive are spaced by OSM's digitiser, not
+by us. No placement rule can draw an arrow on a road that has no segment. Fixed in step 5e.
+
+**Cause 2, arrows along the road — the canyon model, on purpose, and mostly right.** See "The
+canyon model, reviewed" below. Short form: for a wind hitting a street obliquely, the cross-street
+component is blocked by the walls and the along-street component is not, so the flow at rider
+height turns toward the street axis. On the screenshot: ambient toward 67°, Nørrebrogade's axis
+~125°, λ = 0.33 — the model gives 94°, between the two, and the tooltip says exactly that. On the
+narrow side street (λ near 1) it lies almost along the axis. That is textbook channelling, not
+sloppiness. Two things the model does get wrong are listed in the review; neither is what the
+screenshot shows.
+
+**Clutter** — DJ gave one word and one street-level shot. The knobs are in step 5d's acceptance.
+Not touched until the coverage fix is seen, because 17 % of the roads arriving will change the
+picture.
+
+---
+
+## Step 5e — The fixed field: every road, arrows across the carriageway, bike lanes
+
+DJ, 2026-09-04, after 5d, with a sketch over Google Maps of Amager Boulevard: long arrows
+spanning the carriageway, evenly spaced along it, all parallel to the wind; and *"we are not
+really using bike lane maps here — we must."* Earlier the same evening: *"no empty road; many
+closely spaced arrows on every road, their coordinates and lengths fixed; strength as colour or
+fading; fixed on each road of greater Copenhagen."*
+
+Everything below is in `step5e.patch` at the repo root, built and rendered here before this was
+written. It applies cleanly on `f0cdd0f` (`fix/map-legibility`) and on `feat/bike-type`; lint,
+136 tests and the build pass; `npm run data:validate` passes on the regenerated data.
+
+**1. Every road has data.** `compute-cross-sections.mjs` resamples each way along its centreline
+into `n = round(L / 30)` pieces of exactly `L / n` metres instead of cutting at OSM's vertices and
+dropping pieces under 20 m, which left 17 % of central Copenhagen's road length with nothing.
+Ways under 6 m (junction stubs) get nothing; everything else is tiled without gaps. Each piece
+records `startM` (its start distance along the way) and the way's class rank; the tiles carry
+both (`fields` in `segtiles/index.json` grows by two).
+
+**2. Every road is in the data.** `fetch-osm.mjs` gains `trunk`, all `*_link` classes,
+`pedestrian`, `service` (except driveways, parking aisles, drive-throughs, emergency access) and
+`path` with `bicycle=yes` as well as `designated`, and keeps `cycleway:left/right/both` folded
+into the `cycleway` property so a road with a track on one side counts. Overpass is unreachable
+from the review sandbox, so this part is verified only by auto mode running the fetch; its
+timeout is 300 s. If Overpass fails, the step continues on the existing roads file and says so.
+
+**3. Fixed coordinates, spaced by geometry, never overlapping.** `buildFlowField(segments, wind,
+{ mpp, isMobile })` in `FlowLineLayer.ts`:
+
+- Every way carries candidate points at fixed world positions `i × 3 m` from its first node.
+  A point's coordinate never depends on zoom or viewport.
+- **An arrow spans its carriageway**: class width (16 / 13 / 10 / 7 m for arterial … residential,
+  3.5 m cycleway, 5 m service) or half the canyon if that is wider, never more than the canyon;
+  floored at 16 px on screen so zoomed-out arrows stay legible.
+- **Along-road spacing follows the sketch**: 0.4 × the arrow's on-screen length, never under
+  28 px, and never so tight that parallel arrows touch — two arrows *s* apart along a road, both
+  at angle θ to it, are *s*·sin θ apart across and *s*·cos θ along their own axis, and either
+  24 px across or length + 12 px along is enough. Wind along a road: tip to tail. Wind across it:
+  a comb. Zooming out keeps every *k*-th point, so the drawn set at any zoom is a subset of the
+  set at any closer zoom.
+- Two passes decide contested space, both deterministic: one candidate per 28 px cell by rank
+  (arterial > residential > cycleway > service, then lower way id, then lower index), then every
+  winner in that order is kept only if its centre is at least 21 px from every kept centre and
+  outside every kept arrow's capsule (its length plus 12 px, 24 px wide) — tested in both arrows'
+  frames, so crossing arrows never cut through each other. A cycleway beside its road draws
+  nothing where the road's arrows already lie.
+- The 650 / 1700 street cap and its index stride are gone; the screen cells are the cap.
+
+**4. Two layers per arrow, strength as opacity.** A `LineLayer` shaft (3 % of length, 2 – 8 px)
+from tail to a head-length short of the tip, and an `IconLayer` head (`public/arrowhead.svg`, 15 %
+of length, 12 – 36 px) anchored at the tip. Both carry the same objects, so tapping either gives
+the tooltip its street. Colour stays the six-band shelter ratio, which on any one day *is* the
+strength ranking. Absolute strength is opacity, `0.55 + 0.45 · min(v / 5, 1)`: a calm day's field
+is translucent, a gale's is solid. The brightness wave modulates that by ±15 %. `sizeForSpeed` is
+gone; `alphaForSpeed` replaces it and the "two channels, deliberately" comment is rewritten.
+
+**5. Bike lanes.** From the same roads file the router uses, from zoom 15: dedicated cycleways as
+a 2 px green line, roads carrying a `cycleway` value in {track, lane, shared_lane, separate,
+segregated, opposite_*, designated} as a 1.5 px lighter one. `PathLayer`, below the arrows, above
+the buildings, rebuilt only when the roads file lands.
+
+**Numbers, from running it** (existing roads file): 59,750 segments → **118,002**;
+`cph-segments.json` 21.7 → 47.7 MB (under GitHub's 50 MB warning — do not lower `STEP_M` below
+30 without checking this); tiles 7.05 MB, largest 117 KB, average 52 KB; Nørrebro box coverage
+83 % → 100 %. One test tolerance loosens: `windCategory.test.ts` "same picture whatever the wind
+is doing" compared occupancy to six decimals of a percent; with 118k × 24 evaluations a segment
+on a band edge crosses it on floating-point noise, so three decimals now.
+
+**Rendered.** Desktop 13.5 / 15.5 / 16.5 / 17.5 / 18.5 and a phone at 13. At 18.5 Amager-scale
+boulevards carry long parallel arrows across the carriageway, heads and all — the sketch. At 16.5
+and 17.5 a comb along every wide road, single arrows along narrow ones, bike lanes in green. At
+13.5 the arrows trace the road network. Nothing is placed off a road at any zoom; no two arrows
+touch at any zoom (that is a test, not an observation).
+
+### Auto mode
+
+```
+git apply --3way step5e.patch && rm step5e.patch
+node scripts/fetch-osm.mjs          # allowed by this step; on failure, continue and say so
+node scripts/compute-cross-sections.mjs
+node scripts/tile-segments.mjs
+npm run data:validate
+npm run check && npm run build
+git add -A && git commit
+```
+
+Report the three printed numbers: `Total segments`, the `cph-segments.json` size, and `largest
+tile`. Without the refetch they are 118002, 47.66 MB, 117.2 KB; with it they will be larger — say
+by how much. If `cph-segments.json` exceeds 50 MB, stop before committing and report; the fix is
+`STEP_M = 35`, not a force-push. The commit is large (about 142 data files); that is expected.
+
+### Acceptance
+
+DJ's three shots, opening view / `=`×3 / `=`×4, plus one at maximum zoom on a boulevard he knows,
+against the sketch. The claims to check: no road without arrows; arrows spanning the road, evenly
+spaced along it; no two arrows touching; green bike lanes where he knows there are lanes; the same
+arrows in the same places after zooming out and back in.
+
+---
+
+## The canyon model, reviewed 2026-09-04
+
+Prompted by DJ's question above. `canyonModifiedWind()` in `src/math/index.ts`, unchanged since
+step 2a, reviewed against the street-canyon literature.
+
+**What it does.** Takes the 10 m forecast wind, scales it to rider height (× 0.6, log law over
+z₀ = 0.03 m), splits it into along-street and cross-street components against the segment's
+bearing, multiplies the along component by `1 + 0.3 · min(λ, 1.5)` and the cross component by
+`max(0.05, e^(−1.8 λ))`, and recombines. λ = H / W from the building walls found by ray-casting
+from the segment midpoint (or a default when none are found — the `fallback` quarter of the map).
+Direction at rider height is the direction of the recombined vector.
+
+| regime (Oke 1988) | λ | what the literature says at rider height | what the model does | verdict |
+|---|---|---|---|---|
+| isolated roughness | < 0.3 | flow largely follows the ambient, slowed | cross × 0.6–1, along × 1–1.1 | right |
+| wake interference | 0.3 – 0.65 | oblique wind turns toward the axis (helical flow, Dobre 2005) | cross × 0.3–0.6, along × 1.1–1.2 | right |
+| skimming, oblique wind | > 0.65 | along-axis flow persists, cross-axis nearly gone (Soulhac 2008) | cross × ≤ 0.3, along × 1.2–1.45 | right in direction; along gain is at the high end |
+| skimming, wind across the street | > 0.65 | a vortex fills the canyon; at ground the cross flow is **reversed**, ~0.2–0.3 of roof level (Kastner-Klein 2004) | cross × 0.05–0.3, **same sign** as ambient | wrong sign, small magnitude |
+| junctions | — | corner vortices, flow diverted into side streets | nothing; each segment is independent | not modelled |
+
+So the alignment DJ saw is the third row and is physically expected. The two errors:
+
+1. **Perpendicular wind on a deep street points the wrong way.** A rider on a narrow street with
+   the wind blowing straight across it feels a weak wind toward the windward wall, not away from
+   it. Magnitude at 4.4 m/s ambient: about 0.5 m/s. For cycling effort it is a crosswind either
+   way, so the cost is nil; for the arrow's honesty it is a sign error on perhaps a tenth of the
+   map on any given day. A candidate step: below θ = 30° from perpendicular and λ > 0.65, flip the
+   cross component's sign and scale it 0.25. `src/math/index.ts` is guarded; this would be its own
+   step with tests, not a drive-by.
+2. **Junctions.** Arrows change direction abruptly where a channelled side street meets a
+   boulevard. Real flow does too, but through a corner vortex the model does not have. Out of
+   scope for this milestone.
+
+**What has and has not been validated.** The bot's `validation-log.ndjson` compares the MET and
+Open-Meteo *ambient* forecasts against DMI and METAR stations at 10 m — it tells us the input is
+good (currently ±1 m/s, ±15°). It says nothing about the street-level factors. The coefficients
+0.3 and 1.8 and the 0.6 boundary-layer factor are literature-shaped priors, not fitted to any
+Copenhagen measurement. Fitting them needs handheld anemometer runs on a dozen streets of known
+λ, which is the "Out of scope" item at the end of this file and remains so.
+
+**A copy nit seen in the same screenshot, for a later panel pass:** the tooltip's "Riding SE —
+Neutral / crosswind 1.5" is a 1.5 m/s tailwind and "Riding NW" a 1.5 m/s headwind; the ±2 m/s
+band is labelled as if the wind were across the street.
+
 ---
 
 ## Step 6 — Bike-type picker
