@@ -15,7 +15,7 @@ import { reverseGeocode } from "./api/geocode";
 import { arrowDensityForZoom, type RawSegment } from "./layers/buildWindArrows";
 import type { GeometrySource } from "./math";
 import { buildFlowField, createFlowLineLayer, type FlowLine } from "./layers/FlowLineLayer";
-import { rankRoutes, type RouteOption, type RankCriterion } from "./routing/windRoute";
+import { rankRoutes, routeMetrics, DEFAULT_PARAMS, type RouteOption, type RankCriterion } from "./routing/windRoute";
 import type { OutMsg } from "./routing/routingWorker";
 import TopBar from "./components/TopBar";
 import Legend from "./components/Legend";
@@ -381,24 +381,40 @@ function MapApp() {
     [routeOptions, criterion],
   );
 
-  // Route times follow the TimeSlider, so say which hour they used when it is not
-  // the hour we are in.
+  // The verdict is a statement about the day, not about the displayed sort, so it
+  // always reads the recommended order whatever "Sort by wind" is doing.
+  const recommendedOrder = useMemo(
+    () => rankRoutes(routeOptions, "recommended").sorted,
+    [routeOptions],
+  );
+
+  // Route times follow the TimeSlider. The rider's question is "did I scrub?", which
+  // is forecastIdx > 0 — not "is this a different clock hour": fetchCurrentWind drops
+  // steps older than 30 minutes, so from :30 onward forecast[0] is already the next
+  // hour and a clock comparison labelled "Now" as a forecast.
   const routeForecastNote = useMemo(
     () => {
+      if (forecastIdx <= 0) return null;
       const step = forecast[Math.min(forecastIdx, forecast.length - 1)];
-      return forecastNote(step ? new Date(step.time) : null, new Date());
+      return forecastNote(step ? new Date(step.time) : null);
     },
     [forecast, forecastIdx],
   );
 
-  // The verdict names the better hour, so it needs a clock label rather than an
-  // index into the forecast.
+  // The verdict names the better hour AND prices the recommended route at it, so
+  // "Leave at" cannot fire on a rain improvement while the wind gets worse.
+  // routeMetrics is pure and path is plain data posted back from the routing
+  // worker, so this is cheap enough for the main thread.
   const bestWindow = useMemo<BestWindow | null>(() => {
     if (!rideWindow) return null;
     const step = forecast[rideWindow.index];
-    if (!step) return null;
-    return { at: new Date(step.time).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) };
-  }, [rideWindow, forecast]);
+    const rec = recommendedOrder[0];
+    if (!step || !rec) return null;
+    return {
+      at: new Date(step.time).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+      deltaS: routeMetrics(rec.path, step.wind, DEFAULT_PARAMS).windDeltaS,
+    };
+  }, [rideWindow, forecast, recommendedOrder]);
 
   const selectedRoute =
     rankedRoutes.find((o) => o.id === selectedRouteId)
@@ -860,6 +876,7 @@ function MapApp() {
             onSelect={setSelectedRouteId}
             criterion={criterion}
             onCriterion={setCriterion}
+            recommendedOrder={recommendedOrder}
             windIsSimilar={windIsSimilar}
             bestWindow={bestWindow}
             forecastNote={routeForecastNote}

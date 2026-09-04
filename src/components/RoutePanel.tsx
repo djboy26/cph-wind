@@ -42,6 +42,11 @@ interface Props {
   onSelect: (id: string) => void;
   criterion: RankCriterion;
   onCriterion: (c: RankCriterion) => void;
+  /**
+   * rankRoutes(options, 'recommended').sorted, whatever the panel is sorted by.
+   * The verdict is a statement about the day, not about the sort.
+   */
+  recommendedOrder: RouteOption[];
   /** True when wind costs every option about the same — drives the verdict. */
   windIsSimilar: boolean;
   /** A better hour to ride, if bestRideWindow() found one. */
@@ -82,7 +87,7 @@ export default function RoutePanel({
   onPickStart, onPickEnd, onClearStart, onClearEnd, onSwap,
   gpsLoading, gpsError,
   onUseGps, onReset, options, selectedId, onSelect,
-  criterion, onCriterion, windIsSimilar, bestWindow, forecastNote, isMobile,
+  criterion, onCriterion, recommendedOrder, windIsSimilar, bestWindow, forecastNote, isMobile,
 }: Props) {
   if (!active) {
     return (
@@ -100,7 +105,7 @@ export default function RoutePanel({
     );
   }
 
-  const verdict = verdictFor(options, windIsSimilar, bestWindow);
+  const verdict = verdictFor(recommendedOrder, windIsSimilar, bestWindow);
   const sortingByWind = criterion === "avgWind";
 
   // Desktop: cap height so the panel (anchored at top:78) never reaches the
@@ -161,7 +166,8 @@ export default function RoutePanel({
         </button>
       )}
 
-      {forecastNote && (
+      {/* It says "Times below", so it needs times below it. */}
+      {forecastNote && options.length > 0 && (
         <div style={{ fontSize: 12, color: COLORS.dim, marginBottom: 10 }}>{forecastNote}</div>
       )}
 
@@ -229,13 +235,16 @@ export default function RoutePanel({
       )}
 
       <div style={{ display: "flex", gap: 16, marginTop: 14 }}>
-        <button
-          onClick={() => onCriterion(sortingByWind ? "recommended" : "avgWind")}
-          aria-pressed={sortingByWind}
-          style={{ ...quietControl, color: sortingByWind ? COLORS.accent : COLORS.faint }}
-        >
-          Sort by wind
-        </button>
+        {/* Nothing to sort until there is more than one route. */}
+        {options.length > 1 && (
+          <button
+            onClick={() => onCriterion(sortingByWind ? "recommended" : "avgWind")}
+            aria-pressed={sortingByWind}
+            style={{ ...quietControl, color: sortingByWind ? COLORS.accent : COLORS.faint }}
+          >
+            Sort by wind
+          </button>
+        )}
         {/* Inert until the bike-type picker lands in step 6. */}
         <span style={{ fontSize: 12, color: COLORS.faint }}>Commuter bike, 18 km/h</span>
       </div>
