@@ -1375,6 +1375,43 @@ against the sketch. The claims to check: no road without arrows; arrows spanning
 spaced along it; no two arrows touching; green bike lanes where he knows there are lanes; the same
 arrows in the same places after zooming out and back in.
 
+### Completed 2026-09-05 — commit `19bb22e`
+
+Applied with `git apply --3way step5e.patch` on `3a38305` (it fell back to direct application on
+every file, and every file applied clean). The patch file was deleted before the commit and never
+committed. Then, in the Auto mode order: refetch, `compute-cross-sections`, `tile-segments`,
+`npm run data:validate` (passed), `npm run check` (green, **136 tests** in 11 files),
+`npm run build` (clean). Pushed. The nested `cph-wind/` clone was confirmed to have no unsaved
+work and deleted before the run, so the count is the tree's own.
+
+**The refetch ran.** `fetch-osm.mjs` fetched in 10.6 s and wrote **37,799 ways,
+11.03 MB** to `cph-roads.json`.
+
+**The three numbers, from the scripts' own output** (the step's no-refetch baseline alongside):
+
+| number | this run | without refetch |
+|---|---|---|
+| `Total segments` | **159,201** | 118,002 |
+| tiles | 159 tiles, **9.47 MB**, largest **160.1 KB**, average 61.0 KB | 7.05 MB, largest 117.2 KB |
+| `cph-segments.json` | **64.51 MB, now untracked** | 47.66 MB |
+
+**The 50 MB stop fired, and was resolved by untracking, not by `STEP_M`.** With the refetch the
+monolith came out at 64.51 MB, over the line this step set. `STEP_M = 35`, the remedy named
+above, would have landed near 55 MB, still over. Decided by DJ 2026-09-05: keep `STEP_M = 30`,
+add `public/data/cph-segments.json` to `.gitignore` and `git rm --cached` it. It is an
+intermediate that only `tile-segments` and the validator read; the app loads the tiles.
+CLAUDE.md's Data pipeline line now says so and how to regenerate it locally.
+`grep -rn "cph-segments" src api` returns nothing.
+
+**Changed beyond the patch, all on instruction:** the `.gitignore` line, the CLAUDE.md line, and
+the untracking of `cph-segments.json`; plus the regenerated data. Files in the commit: 173,
+`173 files changed, 673 insertions(+), 387 deletions(-)`.
+
+**Unverified visually:** all of it. DJ's three shots, opening view / `=`×3 / `=`×4, plus one at
+maximum zoom on a boulevard he knows, against the sketch. The claims to check: no road without
+arrows; arrows spanning the road, evenly spaced along it; no two arrows touching; green bike lanes
+where he knows there are lanes; the same arrows in the same places after zooming out and back in.
+
 ---
 
 ## The canyon model, reviewed 2026-09-04
