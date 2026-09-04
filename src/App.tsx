@@ -224,8 +224,8 @@ const BOUNDS_PAD = 0.25;
 const MAX_SPAN_DEG = 0.12;
 // Each street gets a few arrows whose positions are recomputed per frame on the CPU,
 // so cap how many streets we draw (thinned evenly across the view) to stay smooth.
-const MAX_FLOW_STREETS_MOBILE = 650;
-const MAX_FLOW_STREETS_DESKTOP = 1700;
+// Arrow lattice pitch in screen pixels: one arrow per 40 px cell at every zoom.
+const ARROW_SPACING_PX = 40;
 
 // --- Segment tiles (built by scripts/tile-segments.mjs; loaded per viewport) ---
 // Streets are split into a spatial grid so the phone downloads only what's in view
@@ -556,6 +556,8 @@ function MapApp() {
 
   const zoom = viewState.zoom ?? initialViewState.zoom;
   const density = arrowDensityForZoom(zoom);
+  // Quantised so the field rebuilds a few times per zoom level, not per frame.
+  const zoomQ = Math.round(zoom * 4) / 4;
 
   // Padded, snapped viewport box (as a stable string key). Recomputed every frame
   // but only changes value when the view moves across a snap cell.
@@ -613,7 +615,7 @@ function MapApp() {
     if (!tileManifest || !activeWind || !boundsKey || density === "hidden") return [];
     const [west, south, east, north] = boundsKey.split(",").map(Number);
     // Gather streets from the loaded tiles intersecting the view, clipped to bounds.
-    let visible: RawSegment[] = [];
+    const visible: RawSegment[] = [];
     for (const key of tileKeysForBounds(tileManifest, west, south, east, north)) {
       const segs = tileCache[key];
       if (!segs) continue;
@@ -621,14 +623,11 @@ function MapApp() {
         if (s.lon >= west && s.lon <= east && s.lat >= south && s.lat <= north) visible.push(s);
       }
     }
-    // Thin streets evenly across the view to bound the per-frame arrow count.
-    const cap = isMobile ? MAX_FLOW_STREETS_MOBILE : MAX_FLOW_STREETS_DESKTOP;
-    if (visible.length > cap) {
-      const stride = Math.ceil(visible.length / cap);
-      visible = visible.filter((_, i) => i % stride === 0);
-    }
-    return buildFlowField(visible, activeWind, density === "single" ? 1 : 3);
-  }, [tileManifest, activeWind, density, boundsKey, isMobile, tileCache]);
+    // One arrow per ARROW_SPACING_PX cell: the grid is the cap.
+    // deck.gl / MapLibre zoom is on 512 px tiles: m/px = 2*pi*R*cos(lat) / (512 * 2^z).
+    const mpp = (78271.517 * Math.cos(viewState.latitude * Math.PI / 180)) / Math.pow(2, zoomQ);
+    return buildFlowField(visible, activeWind, { spacingM: ARROW_SPACING_PX * mpp, onRoad: density === "multi" });
+  }, [tileManifest, activeWind, density, boundsKey, tileCache, zoomQ, viewState.latitude]);
 
   // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
   // footprints would choke the GPU. boundsKey already snaps to a coarse grid, so

@@ -1,11 +1,10 @@
 // src/layers/FlowLineLayer.ts
-// Wind shown as a field of arrows. Each street gets arrows that POINT in the local
-// wind direction (the 3D-canyon-modified flowDeg), are SIZED by absolute wind
-// strength, COLOURED by shelter, and — at 'multi' density — STREAM downwind in a
-// short conveyor. The conveyor uses several staggered arrows per street so the
-// street is always populated: arrows fade only at the wrap point, masked by their
-// neighbours, so nothing visibly "disappears". At 'single' density there is no
-// neighbour to do the masking, so the field is static instead.
+// Wind shown as a lattice of arrows: one per ARROW_SPACING_PX screen cell at every
+// zoom. Each arrow POINTS in the local wind direction of the street it stands for
+// (the canyon-modified flowDeg), is SIZED by absolute wind strength and COLOURED by
+// shelter. Zoomed out the arrow sits on its cell centre (a regular grid); zoomed in
+// it sits on the road. Nothing moves: direction is animated as a soft brightness
+// wave travelling downwind through the lattice.
 
 import { IconLayer } from '@deck.gl/layers';
 import {
@@ -19,26 +18,10 @@ import { windBandColor, shelterRatio } from '../cyclist/windCategory';
 import type { RawSegment } from './buildWindArrows';
 
 const DEG = Math.PI / 180;
-const ARROWS_PER_STREET = 3;
-// How far along the street the arrows are spread (capped), and the max lateral
-// excursion off the centerline. Together they confine every arrow to the road
-// while it drifts in the TRUE wind direction.
-const SPREAD_MAX_M = 40;
-const CROSS_MARGIN_M = 3;
-const RATE = 0.45;
-const FADE = 0.18;
-
-// Max drift (m) along flowDeg before the particle would leave its on-road cell:
-// lots of travel when the wind runs along the street, very little across it. This
-// is what keeps arrows coherent (they move the way they point) AND on the road.
-function boundedTravel(flowDeg: number, bearingDeg: number, alongCellM: number): number {
-  const rel = (flowDeg - bearingDeg) * DEG;
-  const along = Math.abs(Math.cos(rel));
-  const cross = Math.abs(Math.sin(rel));
-  const byAlong = alongCellM / Math.max(along, 1e-3);
-  const byCross = (2 * CROSS_MARGIN_M) / Math.max(cross, 1e-3);
-  return Math.max(0, Math.min(byAlong, byCross, alongCellM * 1.5));
-}
+// Brightness-wave speed, cycles per second (period 4 s).
+const RATE = 0.25;
+// Wavelength of the brightness wave, in lattice cells.
+const WAVELENGTH_CELLS = 6;
 
 export interface FlowLine {
   lon: number;
@@ -47,14 +30,12 @@ export interface FlowLine {
   flowDeg: number;
   /** Street axis (deg CW from N) — used to place arrows along the centerline. */
   bearingDeg: number;
-  /** Fixed offset along the street (m) for this arrow, spreading them down the road. */
+  /** Offset along the street (m) from the segment centre; 0 when on the lattice. */
   baseAlongM: number;
-  /** Max drift (m) in flowDeg — bounded by the road so the arrow stays on it. */
-  travelLenM: number;
   color: [number, number, number];
   /** Arrow size in PIXELS (bigger = stronger wind) — the same at every zoom. */
   sizePx: number;
-  /** Stagger position along the conveyor, 0..1. */
+  /** Position along the ambient wind vector in brightness-wave wavelengths, 0..1. */
   phase: number;
   // --- carried for the tooltip ---
   speedMs: number;
@@ -102,84 +83,99 @@ function normalize(seg: RawSegment): SegmentInput {
 // the arrowhead still resolves on a light ground; 22 px is where arrows start to
 // overlap at 'multi' density. Rendered: 1.1 m/s → 10.4 px, 3.17 → 15.0, 5 → 19,
 // ≥ 6.4 → 22.
+// Pixels. 10 px is the smallest size at which the arrowhead still reads on a light
+// ground; 18 px keeps the longest arrow under half the 40 px lattice pitch, so
+// neighbours never touch whatever way the wind blows.
 function sizeForSpeed(speedMs: number): number {
-  return Math.max(8, Math.min(22, 8 + speedMs * 2.2));
+  return Math.max(10, Math.min(18, 10 + speedMs * 1.6));
 }
 
+export interface FlowFieldOptions {
+  /** Lattice pitch in metres at the current zoom: ARROW_SPACING_PX × metres-per-pixel. */
+  spacingM: number;
+  /** Zoom >= 16: arrows sit on the road they stand for. Below: on the cell centre. */
+  onRoad: boolean;
+}
+
+const M_PER_DEG_LAT = 111320;
+
 /**
- * Wind-direction arrows spread along each street; each drifts (bounded) in flowDeg.
- *
- * `arrowsPerStreet` is the zoom density rule: 3 from zoom 16 up ('multi'), 1 below
- * it ('single'). At one arrow per street there is no neighbour to mask the conveyor's
- * wrap-around fade — with FADE = 0.18 a third of the field would be half-transparent
- * at any instant and read as arrows randomly missing — so the single-arrow field is
- * static: travelLenM is 0 and arrowAlpha() treats 0 as "always fully drawn". The
- * animation is a zoom-16-and-up feature.
+ * One arrow per grid cell. Every segment offers candidate points every `spacingM`
+ * along its axis (at least its centre); the candidates are binned into square
+ * cells `spacingM` wide in local metres and the one nearest each cell's centre wins.
+ * Two regimes fall out of one rule: zoomed in, cells are smaller than segments and
+ * arrows run along each road at even spacing; zoomed out, cells hold many segments
+ * and the field thins to an even grid. Junctions and parallel cycleways never pile
+ * up because they share cells.
  */
-export function buildFlowField(
-  segments: RawSegment[],
-  wind: Wind,
-  arrowsPerStreet = ARROWS_PER_STREET,
-): FlowLine[] {
-  const out: FlowLine[] = [];
+export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFieldOptions): FlowLine[] {
+  const { spacingM, onRoad } = opts;
+  if (segments.length === 0 || !(spacingM > 0)) return [];
+  const lat0 = segments[0].lat * DEG;
+  const mPerDegLon = M_PER_DEG_LAT * Math.cos(lat0);
+  interface Cand { seg: SegmentInput; raw: RawSegment; alongM: number; d2: number; cx: number; cy: number }
+  const cells = new Map<string, Cand>();
   for (const raw of segments) {
     const seg = normalize(raw);
-    const cw = computeSegmentCenterWind(seg, wind); // { speedMs, flowDeg, gustMs }
-    // Colour is shelter (street / ambient), not absolute speed — see windCategory.
+    const L = seg.segmentLengthM;
+    // Candidates every half cell so every cell a road crosses gets one; the nearest-to-centre
+    // rule then keeps exactly one per cell.
+    const n = Math.max(1, Math.round((2 * L) / spacingM));
+    for (let k = 0; k < n; k++) {
+      const alongM = ((k + 0.5) / n - 0.5) * L;
+      const p = offsetAlongBearing({ lon: seg.lon, lat: seg.lat }, seg.bearingDeg, alongM);
+      const xM = p.lon * mPerDegLon;
+      const yM = p.lat * M_PER_DEG_LAT;
+      const cx = Math.floor(xM / spacingM);
+      const cy = Math.floor(yM / spacingM);
+      const dx = xM - (cx + 0.5) * spacingM;
+      const dy = yM - (cy + 0.5) * spacingM;
+      const d2 = dx * dx + dy * dy;
+      const key = cx + ',' + cy;
+      const cur = cells.get(key);
+      if (!cur || d2 < cur.d2) cells.set(key, { seg, raw, alongM, d2, cx, cy });
+    }
+  }
+  const travelRad = ((wind.directionDeg + 180) % 360) * DEG;
+  const waveX = Math.sin(travelRad), waveY = Math.cos(travelRad);
+  const out: FlowLine[] = [];
+  const windCache = new Map<RawSegment, ReturnType<typeof computeSegmentCenterWind>>();
+  for (const c of cells.values()) {
+    let cw = windCache.get(c.raw);
+    if (!cw) { cw = computeSegmentCenterWind(c.seg, wind); windCache.set(c.raw, cw); }
     const color = windBandColor(shelterRatio(cw.speedMs, wind.speedMs));
     const sizePx = sizeForSpeed(cw.speedMs);
-    // Spread the arrows along the street centerline, each within its own slot.
-    const spread = Math.min(seg.segmentLengthM, SPREAD_MAX_M);
-    const alongCell = spread / arrowsPerStreet;
-    const travelLenM = arrowsPerStreet <= 1 ? 0 : boundedTravel(cw.flowDeg, seg.bearingDeg, alongCell);
-    for (let k = 0; k < arrowsPerStreet; k++) {
-      const baseAlongM = ((k + 0.5) / arrowsPerStreet - 0.5) * spread;
-      out.push({
-        lon: seg.lon,
-        lat: seg.lat,
-        flowDeg: cw.flowDeg,
-        bearingDeg: seg.bearingDeg,
-        baseAlongM,
-        travelLenM,
-        color,
-        sizePx,
-        phase: k / arrowsPerStreet,
-        speedMs: cw.speedMs,
-        gustMs: cw.gustMs,
-        canyonH: seg.canyonH,
-        canyonW: seg.canyonW,
-        leftHeightM: seg.leftHeightM,
-        rightHeightM: seg.rightHeightM,
-        geometrySource: seg.geometrySource,
-        wayId: raw.wayId,
-      });
-    }
+    // Brightness wave travelling downwind across the whole field (see arrowAlpha):
+    // phase is the arrow's position along the ambient wind vector, in wavelengths.
+    const xM = (c.cx + 0.5) * spacingM, yM = (c.cy + 0.5) * spacingM;
+    const phase = (((xM * waveX + yM * waveY) / (WAVELENGTH_CELLS * spacingM)) % 1 + 1) % 1;
+    const lon = onRoad ? c.seg.lon : ((c.cx + 0.5) * spacingM) / mPerDegLon;
+    const lat = onRoad ? c.seg.lat : ((c.cy + 0.5) * spacingM) / M_PER_DEG_LAT;
+    out.push({
+      lon, lat,
+      flowDeg: cw.flowDeg, bearingDeg: c.seg.bearingDeg,
+      baseAlongM: onRoad ? c.alongM : 0, color, sizePx, phase,
+      speedMs: cw.speedMs, gustMs: cw.gustMs,
+      canyonH: c.seg.canyonH, canyonW: c.seg.canyonW,
+      leftHeightM: c.seg.leftHeightM, rightHeightM: c.seg.rightHeightM,
+      geometrySource: c.seg.geometrySource, wayId: c.raw.wayId,
+    });
   }
   return out;
 }
 
-function fracOf(d: FlowLine, time: number): number {
-  return (((d.phase + time * RATE) % 1) + 1) % 1;
-}
-
-function arrowPosition(d: FlowLine, time: number): [number, number] {
-  const frac = fracOf(d, time);
-  // Anchor on the street centerline, then drift in the TRUE wind direction (flowDeg)
-  // — the arrow moves the way it points. travelLenM is bounded by the road, so the
-  // cross-street excursion can't leave the carriageway.
-  const anchor = offsetAlongBearing({ lon: d.lon, lat: d.lat }, d.bearingDeg, d.baseAlongM);
-  const drift = (frac - 0.5) * d.travelLenM;
-  const p = offsetAlongBearing(anchor, d.flowDeg, drift);
+function arrowPosition(d: FlowLine): [number, number] {
+  // Anchored: on the lattice cell centre when zoomed out, on the road when zoomed in.
+  const p = offsetAlongBearing({ lon: d.lon, lat: d.lat }, d.bearingDeg, d.baseAlongM);
   return [p.lon, p.lat];
 }
 
+// Arrows never move and never vanish. Direction is animated as a soft brightness wave
+// that travels downwind through the lattice; alpha stays within [ALPHA_MIN, 1].
+const ALPHA_MIN = 0.7;
 function arrowAlpha(d: FlowLine, time: number): number {
-  // A static arrow (single density) has no wrap point to fade at.
-  if (d.travelLenM === 0) return 1;
-  const frac = fracOf(d, time);
-  // Full in the middle, fading to 0 only in the outer FADE band at each end.
-  const t = Math.min(frac, 1 - frac) / FADE;
-  return Math.max(0, Math.min(1, t));
+  const w = 0.5 + 0.5 * Math.sin(2 * Math.PI * (d.phase - time * RATE));
+  return ALPHA_MIN + (1 - ALPHA_MIN) * w;
 }
 
 interface FlowLineLayerOpts {
@@ -201,7 +197,7 @@ export function createFlowLineLayer({ data, time, isMobile, onHover, onClick }: 
     sizeUnits: 'pixels',
     // Phones are held further from the eye and the arrow is a touch target.
     getSize: (d) => d.sizePx + (isMobile ? 2 : 0),
-    getPosition: (d) => arrowPosition(d, time),
+    getPosition: (d) => arrowPosition(d),
     getAngle: (d) => 90 - d.flowDeg,
     getColor: (d) => {
       const a = arrowAlpha(d, time);
@@ -211,6 +207,6 @@ export function createFlowLineLayer({ data, time, isMobile, onHover, onClick }: 
     billboard: false,
     onHover,
     onClick,
-    updateTriggers: { getPosition: time, getColor: time },
+    updateTriggers: { getColor: time },
   });
 }
