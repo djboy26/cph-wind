@@ -11,6 +11,10 @@ import type { SegmentInput } from '../math';
 
 export interface RawSegment extends SegmentInput {
   wayId: string | number | undefined;
+  /** Where this piece starts along its way, metres from the way's first node. */
+  startM?: number;
+  /** 0 arterial … 5 service; lower wins a contested screen cell. */
+  classRank?: number;
   /** Optional carriageway width (metres). Nothing sets it today; kept so the decoded segment shape is unchanged. */
   roadWidthM?: number;
 }

@@ -5,10 +5,11 @@ import osmtogeojson from "osmtogeojson";
 const BBOX = "55.58,12.40,55.78,12.75";
 
 const QUERY = `
-[out:json][timeout:120];
+[out:json][timeout:300];
 (
-  way["highway"~"^(primary|secondary|tertiary|residential|unclassified|living_street|cycleway)$"](${BBOX});
-  way["highway"="path"]["bicycle"="designated"](${BBOX});
+  way["highway"~"^(trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street|pedestrian|cycleway)$"](${BBOX});
+  way["highway"="service"]["service"!~"^(driveway|parking_aisle|drive-through|emergency_access)$"](${BBOX});
+  way["highway"="path"]["bicycle"~"^(designated|yes)$"](${BBOX});
   way["cycleway"](${BBOX});
   way["cycleway:left"](${BBOX});
   way["cycleway:right"](${BBOX});
@@ -54,7 +55,8 @@ async function main() {
         id: f.properties.id,
         name: tags.name ?? null,
         highway: tags.highway ?? null,
-        cycleway: tags.cycleway ?? null,
+        // Any of the cycleway tags, so a road with a track on one side still counts.
+        cycleway: tags.cycleway ?? tags["cycleway:both"] ?? tags["cycleway:left"] ?? tags["cycleway:right"] ?? null,
         width: tags.width ?? null,
       },
     };

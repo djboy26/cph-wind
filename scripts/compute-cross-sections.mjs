@@ -8,11 +8,12 @@ const ROADS_PATH = "public/data/cph-roads.json";
 const OUTPUT_PATH = "public/data/cph-segments.json";
 
 const MAX_SEARCH_M = 40;
-const MIN_SEGMENT_M = 20;
-// A way whose every sub-segment is shorter than MIN_SEGMENT_M gets no arrow at
-// all. To still show wind on short streets/cycleways, emit one representative
-// segment per such way as long as its longest piece is at least this long
-// (skips sub-6m intersection stubs, which would be pure noise).
+// Every way is resampled into pieces of about STEP_M along its centreline before a
+// cross-section is cast, so coverage no longer depends on where OSM happened to put
+// its vertices: a curve digitised as forty 5 m chords and a straight drawn as one
+// 300 m line both come out as evenly spaced pieces. A way shorter than
+// MIN_COVERAGE_M (an intersection stub) gets nothing.
+const STEP_M = 30;
 const MIN_COVERAGE_M = 6;
 const CENTROID_FALLBACK_RADIUS_M = 25;
 
@@ -206,10 +207,38 @@ async function main() {
   }
   centroidIndex.finish();
 
+
+/**
+ * Cut a way's polyline into pieces of about STEP_M measured along it. n = round(L /
+ * STEP_M) pieces of exactly L / n each, so no piece is ever shorter than STEP_M / 2
+ * and a way's pieces tile it without gaps. Each piece's chord [A, B] carries the
+ * local bearing; on a curve the chord error at 30 m is under a degree. The fourth
+ * element is the piece's start distance along the way.
+ * Returns [] for a way shorter than MIN_COVERAGE_M.
+ */
+function resample(coords) {
+  const pts = coords.map(([lon, lat]) => ({ lon, lat, ...toLocal(lon, lat) }));
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y));
+  const L = cum[cum.length - 1];
+  if (L < MIN_COVERAGE_M) return [];
+  const n = Math.max(1, Math.round(L / STEP_M));
+  const step = L / n;
+  // Point at distance d along the polyline, interpolated in lon/lat.
+  const at = (d) => {
+    let i = 1;
+    while (i < cum.length - 1 && cum[i] < d) i++;
+    const t = cum[i] === cum[i - 1] ? 0 : (d - cum[i - 1]) / (cum[i] - cum[i - 1]);
+    return [pts[i - 1].lon + (pts[i].lon - pts[i - 1].lon) * t, pts[i - 1].lat + (pts[i].lat - pts[i - 1].lat) * t];
+  };
+  const out = [];
+  for (let k = 0; k < n; k++) out.push([at(k * step), at(Math.min(L, (k + 1) * step)), step, k * step]);
+  return out;
+}
+
   console.log("Computing per-segment cross-sections...");
   const segments = [];
   const stats = { measured: 0, partial: 0, fallback: 0 };
-  let coverageFallbacks = 0;
   let n = 0;
 
   // Build one segment's cross-section by ray-casting both kerbs from its midpoint.
@@ -291,39 +320,21 @@ async function main() {
     const osmWidth = parseOsmWidth(feature.properties);
     const wayId = feature.properties.id;
 
-    let featureCount = 0;
-    let longest = null; // the longest sub-segment seen, for the coverage fallback
-
-    for (let i = 0; i < coords.length - 1; i++) {
-      const [lonA, latA] = coords[i];
-      const [lonB, latB] = coords[i + 1];
-      const a = toLocal(lonA, latA);
-      const b = toLocal(lonB, latB);
-      const segLen = dist(a.x, a.y, b.x, b.y);
-      if (!longest || segLen > longest.segLen) longest = { lonA, latA, lonB, latB, segLen };
-      if (segLen < MIN_SEGMENT_M) continue;
-
-      const s = buildSegment(lonA, latA, lonB, latB, segLen, wayId, defaultWidth, osmWidth);
+    for (const [A, B, segLen, startM] of resample(coords)) {
+      const s = buildSegment(A[0], A[1], B[0], B[1], segLen, wayId, defaultWidth, osmWidth);
+      // Where this piece starts along its way (m) and the way's class: the arrow
+      // field places arrows at fixed distances along each way and, where two ways
+      // share a screen cell, keeps the higher-ranked one.
+      s.startM = Math.round(startM * 10) / 10;
+      s.highway = highway;
       segments.push(s);
       stats[s.geometrySource]++;
-      featureCount++;
-
       n++;
       if (n % 20000 === 0) console.log(`  ${n} segments...`);
-    }
-
-    // Coverage fallback: ways with no long-enough piece still get one arrow.
-    if (featureCount === 0 && longest && longest.segLen >= MIN_COVERAGE_M) {
-      const s = buildSegment(longest.lonA, longest.latA, longest.lonB, longest.latB, longest.segLen, wayId, defaultWidth, osmWidth);
-      segments.push(s);
-      stats[s.geometrySource]++;
-      coverageFallbacks++;
-      n++;
     }
   }
 
   console.log(`Total segments: ${segments.length}`);
-  console.log(`  (incl. ${coverageFallbacks} coverage fallbacks for short ways)`);
   console.log("Geometry sources:");
   console.log(`  measured: ${stats.measured}`);
   console.log(`  partial:  ${stats.partial}`);

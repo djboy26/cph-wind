@@ -9,7 +9,7 @@ import { Map as MapLibreMap } from "react-map-gl/maplibre";
 import type * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import type { FeatureCollection } from "geojson";
+import type { Feature, FeatureCollection, LineString } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
 import { reverseGeocode } from "./api/geocode";
 import { arrowDensityForZoom, type RawSegment } from "./layers/buildWindArrows";
@@ -122,6 +122,11 @@ const MAX_ZOOM = 18.5;
 // 3D buildings: only fetch/render once the rider zooms in past the city overview
 // (the slim file is ~42 MB, so we load it lazily, not on first paint).
 const BUILDINGS_MIN_ZOOM = 14;
+const BIKE_LANES_MIN_ZOOM = 15;
+// OSM cycleway values that mean "there is bike infrastructure on this road".
+const BIKE_LANE_TAGS = new Set(["track", "lane", "shared_lane", "separate", "segregated", "opposite_track", "opposite_lane", "designated"]);
+const BIKE_LANE_RGBA: [number, number, number, number] = [38, 140, 92, 210];
+const BIKE_LANE_ON_ROAD_RGBA: [number, number, number, number] = [38, 140, 92, 130];
 const clampN = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 function constrainView<T extends { longitude?: number; latitude?: number; zoom?: number }>(vs: T): T {
   return {
@@ -224,8 +229,6 @@ const BOUNDS_PAD = 0.25;
 const MAX_SPAN_DEG = 0.12;
 // Each street gets a few arrows whose positions are recomputed per frame on the CPU,
 // so cap how many streets we draw (thinned evenly across the view) to stay smooth.
-// Arrow lattice pitch in screen pixels: one arrow per 32 px cell at every zoom.
-const ARROW_SPACING_PX = 32;
 
 // --- Segment tiles (built by scripts/tile-segments.mjs; loaded per viewport) ---
 // Streets are split into a spatial grid so the phone downloads only what's in view
@@ -233,13 +236,15 @@ const ARROW_SPACING_PX = 32;
 // widthM / canyon / lanes are recomputed here.
 interface TileManifest { tileDeg: number; minLon: number; minLat: number; tiles: Set<string>; }
 const GEOM_SRC = ["measured", "partial", "fallback"] as const;
-type SegTuple = [number, number, number, number, number, number, number, number, number, string | number | null];
+type SegTuple = [number, number, number, number, number, number, number, number, number, string | number | null, number?, number?];
 
 function decodeSeg(t: SegTuple): RawSegment {
-  const [lon, lat, bearingDeg, segLen, leftDist, rightDist, leftH, rightH, geomSrc, wayId] = t;
+  const [lon, lat, bearingDeg, segLen, leftDist, rightDist, leftH, rightH, geomSrc, wayId, startM, classRank] = t;
   const widthM = leftDist + rightDist;
   return {
     wayId: wayId ?? undefined,
+    startM: startM ?? 0,
+    classRank: classRank ?? 3,
     lon, lat, bearingDeg, segmentLengthM: segLen,
     widthM, leftDistM: leftDist, rightDistM: rightDist,
     leftHeightM: leftH, rightHeightM: rightH,
@@ -623,11 +628,10 @@ function MapApp() {
         if (s.lon >= west && s.lon <= east && s.lat >= south && s.lat <= north) visible.push(s);
       }
     }
-    // One arrow per ARROW_SPACING_PX cell: the grid is the cap.
     // deck.gl / MapLibre zoom is on 512 px tiles: m/px = 2*pi*R*cos(lat) / (512 * 2^z).
     const mpp = (78271.517 * Math.cos(viewState.latitude * Math.PI / 180)) / Math.pow(2, zoomQ);
-    return buildFlowField(visible, activeWind, { spacingM: ARROW_SPACING_PX * mpp, onRoad: density === "multi" });
-  }, [tileManifest, activeWind, density, boundsKey, tileCache, zoomQ, viewState.latitude]);
+    return buildFlowField(visible, activeWind, { mpp, isMobile });
+  }, [tileManifest, activeWind, density, boundsKey, tileCache, zoomQ, viewState.latitude, isMobile]);
 
   // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
   // footprints would choke the GPU. boundsKey already snaps to a coarse grid, so
@@ -722,11 +726,12 @@ function MapApp() {
   // Animated dashed flow streaks (oriented in the wind direction). Rebuilt per frame
   // (flowPhase), but that only updates a single GPU time uniform — the path/color
   // attributes are unchanged, so it's cheap. Also the pick target for the tooltip.
-  const flowLinesLayer = useMemo(() => {
-    if (flowLines.length === 0) return null;
+  const flowLineLayers = useMemo(() => {
+    if (flowLines.length === 0) return [] as Layer[];
     return createFlowLineLayer({
       data: flowLines,
       time: flowPhase,
+      mpp: (78271.517 * Math.cos(viewState.latitude * Math.PI / 180)) / Math.pow(2, zoomQ),
       isMobile,
       // While planning a route, clicks set waypoints instead of pinning a street.
       onHover: isMobile || routing ? undefined : (info) => {
@@ -737,11 +742,35 @@ function MapApp() {
         return true;
       },
     });
-  }, [flowLines, flowPhase, isMobile, routing]);
+  }, [flowLines, flowPhase, isMobile, routing, zoomQ, viewState.latitude]);
+
+  // Bike lanes from the same OSM download the router uses: dedicated cycleways as a
+  // solid green line, roads with a track or lane as a thinner one. From zoom 15, so the
+  // city view is not a green mesh. Static; rebuilt only when the roads file lands.
+  const bikeLaneLayers = useMemo(() => {
+    if (!roads || (viewState.zoom ?? 0) < BIKE_LANES_MIN_ZOOM) return [] as Layer[];
+    const lanes = roads.features.filter((f) => {
+      const p = f.properties as { highway?: string | null; cycleway?: string | null };
+      return p.highway === "cycleway" || BIKE_LANE_TAGS.has(p.cycleway ?? "");
+    });
+    return [
+      new PathLayer<Feature>({
+        id: "bike-lanes",
+        data: lanes,
+        getPath: (f) => (f.geometry as LineString).coordinates as [number, number][],
+        getColor: (f) => ((f.properties as { highway?: string | null }).highway === "cycleway" ? BIKE_LANE_RGBA : BIKE_LANE_ON_ROAD_RGBA),
+        getWidth: (f) => ((f.properties as { highway?: string | null }).highway === "cycleway" ? 2 : 1.5),
+        widthUnits: "pixels",
+        capRounded: true,
+        jointRounded: true,
+        pickable: false,
+      }),
+    ];
+  }, [roads, viewState.zoom]);
 
   const layers = useMemo(
-    () => [...buildingLayers, ...(flowLinesLayer ? [flowLinesLayer] : []), ...routeLayers],
-    [buildingLayers, flowLinesLayer, routeLayers],
+    () => [...buildingLayers, ...bikeLaneLayers, ...flowLineLayers, ...routeLayers],
+    [buildingLayers, bikeLaneLayers, flowLineLayers, routeLayers],
   );
 
   // "Loaded" = the tile manifest is in and the first viewport tile has decoded

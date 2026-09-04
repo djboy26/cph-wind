@@ -55,7 +55,7 @@ npm run data:rebuild    # fetch-osm -> fetch-buildings -> compute-cross-sections
 npm run data:validate
 ```
 
-Generated artefacts in `public/data/` are committed. `segtiles/` is the tiled form the app loads.
+Generated artefacts in `public/data/` are committed, except `cph-segments.json`, which is an intermediate that `tile-segments` and the validator read; regenerate it locally with `node scripts/compute-cross-sections.mjs`.
 
 ## Do not start a dev server, and do not try to render the app
 
