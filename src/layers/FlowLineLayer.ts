@@ -1,10 +1,11 @@
 // src/layers/FlowLineLayer.ts
-// Wind shown as a field of arrows. Each street gets a few arrows that POINT in the
-// local wind direction (the 3D-canyon-modified flowDeg), are SIZED by wind strength,
-// coloured by the cyclist speed band, and STREAM downwind in a short conveyor. The
-// conveyor uses several staggered arrows per street so the street is always
-// populated — arrows fade only at the wrap point, masked by their neighbours, so
-// nothing visibly "disappears".
+// Wind shown as a field of arrows. Each street gets arrows that POINT in the local
+// wind direction (the 3D-canyon-modified flowDeg), are SIZED by absolute wind
+// strength, COLOURED by shelter, and — at 'multi' density — STREAM downwind in a
+// short conveyor. The conveyor uses several staggered arrows per street so the
+// street is always populated: arrows fade only at the wrap point, masked by their
+// neighbours, so nothing visibly "disappears". At 'single' density there is no
+// neighbour to do the masking, so the field is static instead.
 
 import { IconLayer } from '@deck.gl/layers';
 import {
@@ -51,8 +52,8 @@ export interface FlowLine {
   /** Max drift (m) in flowDeg — bounded by the road so the arrow stays on it. */
   travelLenM: number;
   color: [number, number, number];
-  /** Arrow size in metres (bigger = stronger wind). */
-  sizeM: number;
+  /** Arrow size in PIXELS (bigger = stronger wind) — the same at every zoom. */
+  sizePx: number;
   /** Stagger position along the conveyor, 0..1. */
   phase: number;
   // --- carried for the tooltip ---
@@ -95,29 +96,44 @@ function normalize(seg: RawSegment): SegmentInput {
 // channel and drops absolute strength, which since step 3c is shown nowhere else on
 // the map — only in the tooltip.
 //
-// The range is a FIRST GUESS, derived from the post-3c speed distribution (street
-// level runs roughly 0.25x to 0.72x of ambient) and not from looking at the map. It
-// roughly doubles the usable spread, so six colour bands are no longer drawn across
-// about three pixels of size difference. Expect a second pass once screenshots exist.
+// Pixels, not metres. A data glyph should encode the same value the same way at
+// every zoom; only a metre-sized glyph needs a zoom-dependent pixel clamp, and that
+// clamp is what flattened this channel before. 8 px is the smallest size at which
+// the arrowhead still resolves on a light ground; 22 px is where arrows start to
+// overlap at 'multi' density. Rendered: 1.1 m/s → 10.4 px, 3.17 → 15.0, 5 → 19,
+// ≥ 6.4 → 22.
 function sizeForSpeed(speedMs: number): number {
-  return Math.max(4, Math.min(14, 3.2 + speedMs * 1.5));
+  return Math.max(8, Math.min(22, 8 + speedMs * 2.2));
 }
 
-/** Wind-direction arrows spread along each street; each drifts (bounded) in flowDeg. */
-export function buildFlowField(segments: RawSegment[], wind: Wind): FlowLine[] {
+/**
+ * Wind-direction arrows spread along each street; each drifts (bounded) in flowDeg.
+ *
+ * `arrowsPerStreet` is the zoom density rule: 3 from zoom 16 up ('multi'), 1 below
+ * it ('single'). At one arrow per street there is no neighbour to mask the conveyor's
+ * wrap-around fade — with FADE = 0.18 a third of the field would be half-transparent
+ * at any instant and read as arrows randomly missing — so the single-arrow field is
+ * static: travelLenM is 0 and arrowAlpha() treats 0 as "always fully drawn". The
+ * animation is a zoom-16-and-up feature.
+ */
+export function buildFlowField(
+  segments: RawSegment[],
+  wind: Wind,
+  arrowsPerStreet = ARROWS_PER_STREET,
+): FlowLine[] {
   const out: FlowLine[] = [];
   for (const raw of segments) {
     const seg = normalize(raw);
     const cw = computeSegmentCenterWind(seg, wind); // { speedMs, flowDeg, gustMs }
     // Colour is shelter (street / ambient), not absolute speed — see windCategory.
     const color = windBandColor(shelterRatio(cw.speedMs, wind.speedMs));
-    const sizeM = sizeForSpeed(cw.speedMs);
+    const sizePx = sizeForSpeed(cw.speedMs);
     // Spread the arrows along the street centerline, each within its own slot.
     const spread = Math.min(seg.segmentLengthM, SPREAD_MAX_M);
-    const alongCell = spread / ARROWS_PER_STREET;
-    const travelLenM = boundedTravel(cw.flowDeg, seg.bearingDeg, alongCell);
-    for (let k = 0; k < ARROWS_PER_STREET; k++) {
-      const baseAlongM = ((k + 0.5) / ARROWS_PER_STREET - 0.5) * spread;
+    const alongCell = spread / arrowsPerStreet;
+    const travelLenM = arrowsPerStreet <= 1 ? 0 : boundedTravel(cw.flowDeg, seg.bearingDeg, alongCell);
+    for (let k = 0; k < arrowsPerStreet; k++) {
+      const baseAlongM = ((k + 0.5) / arrowsPerStreet - 0.5) * spread;
       out.push({
         lon: seg.lon,
         lat: seg.lat,
@@ -126,8 +142,8 @@ export function buildFlowField(segments: RawSegment[], wind: Wind): FlowLine[] {
         baseAlongM,
         travelLenM,
         color,
-        sizeM,
-        phase: k / ARROWS_PER_STREET,
+        sizePx,
+        phase: k / arrowsPerStreet,
         speedMs: cw.speedMs,
         gustMs: cw.gustMs,
         canyonH: seg.canyonH,
@@ -158,6 +174,8 @@ function arrowPosition(d: FlowLine, time: number): [number, number] {
 }
 
 function arrowAlpha(d: FlowLine, time: number): number {
+  // A static arrow (single density) has no wrap point to fade at.
+  if (d.travelLenM === 0) return 1;
   const frac = fracOf(d, time);
   // Full in the middle, fading to 0 only in the outer FADE band at each end.
   const t = Math.min(frac, 1 - frac) / FADE;
@@ -180,10 +198,9 @@ export function createFlowLineLayer({ data, time, isMobile, onHover, onClick }: 
     getIcon: () => 'arrow',
     iconAtlas: '/arrow.svg',
     iconMapping: { arrow: { x: 0, y: 0, width: 64, height: 64, anchorX: 32, anchorY: 32, mask: true } },
-    sizeUnits: 'meters',
-    getSize: (d) => d.sizeM,
-    sizeMinPixels: isMobile ? 8 : 6,
-    sizeMaxPixels: 28,
+    sizeUnits: 'pixels',
+    // Phones are held further from the eye and the arrow is a touch target.
+    getSize: (d) => d.sizePx + (isMobile ? 2 : 0),
     getPosition: (d) => arrowPosition(d, time),
     getAngle: (d) => 90 - d.flowDeg,
     getColor: (d) => {

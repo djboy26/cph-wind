@@ -145,7 +145,7 @@ function useIsMobile() {
 }
 
 // Continuously increasing seconds (wrapped well above any animation cycle).
-// The WindFlowLayer derives per-arrow drift from this, so keeping it smooth and
+// The FlowLineLayer derives per-arrow drift from this, so keeping it smooth and
 // unwrapped avoids visible jumps when arrows animate at different rates.
 //
 // Each tick re-renders the app, so we cap the emit rate via minIntervalMs (30 fps
@@ -611,7 +611,7 @@ function MapApp() {
       const stride = Math.ceil(visible.length / cap);
       visible = visible.filter((_, i) => i % stride === 0);
     }
-    return buildFlowField(visible, activeWind);
+    return buildFlowField(visible, activeWind, density === "single" ? 1 : 3);
   }, [tileManifest, activeWind, density, boundsKey, isMobile, tileCache]);
 
   // Only extrude the buildings inside the (padded) viewport box — 220k city-wide

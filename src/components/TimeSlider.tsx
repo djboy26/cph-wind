@@ -26,6 +26,7 @@ interface Props {
   rideWindow?: RideWindow | null;
 }
 
+const nowrap = { whiteSpace: "nowrap" } as const;
 const RAIN_FULL_MM = 4; // precip at/above this fills the bar height
 const RAIN_COLOR = "rgba(47,106,240,0.55)";
 const NIGHT_TINT = "rgba(40,52,86,0.13)";
@@ -60,19 +61,22 @@ export default function TimeSlider({ steps, index, onChange, isMobile, lat, lon,
   const frac = (idx: number) => (n <= 1 ? 0 : idx / (n - 1));
 
   return (
-    <div style={{ ...glass, padding: isMobile ? "9px 13px 7px" : "10px 15px 8px", width: isMobile ? "auto" : 320 }}>
+    <div style={{ ...glass, padding: isMobile ? "9px 13px 7px" : "10px 15px 8px", width: isMobile ? "auto" : 340 }}>
+      {/* Data never wraps or clips; the label yields first (shrinks, then ellipsises).
+          At "11.0 m/s · gust 16 · 15°" the label used to break onto two lines and
+          "m/s" dropped under its number. */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-        <span style={labelStyle}>Wind forecast</span>
-        <span style={{ ...NUM, fontSize: 12.5, color: COLORS.dim, display: "flex", gap: 8, alignItems: "baseline" }}>
-          <span style={{ color: isNow ? COLORS.accentInk : COLORS.text, fontWeight: 700 }}>{stepLabel(steps, i)}</span>
-          <span>
-            <span style={{ fontWeight: 700, color: COLORS.text }}>{spd.toFixed(1)}</span> m/s
+        <span style={{ ...labelStyle, ...nowrap, flexShrink: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>Wind forecast</span>
+        <span style={{ ...NUM, ...nowrap, flexShrink: 0, fontSize: 12.5, color: COLORS.dim, display: "flex", gap: 8, alignItems: "baseline" }}>
+          <span style={{ ...nowrap, color: isNow ? COLORS.accentInk : COLORS.text, fontWeight: 700 }}>{stepLabel(steps, i)}</span>
+          <span style={nowrap}>
+            <span style={{ ...nowrap, fontWeight: 700, color: COLORS.text }}>{spd.toFixed(1)}</span> m/s
           </span>
-          {gust != null && gust - spd >= 2 && <span style={{ color: COLORS.faint }}>gust {gust.toFixed(0)}</span>}
-          {temp != null && <span style={{ color: COLORS.text }}>{Math.round(temp)}°</span>}
-          {rain > 0 && <span style={{ color: COLORS.accentInk }}>{rain.toFixed(1)}mm</span>}
+          {gust != null && gust - spd >= 2 && <span style={{ ...nowrap, color: COLORS.faint }}>gust {gust.toFixed(0)}</span>}
+          {temp != null && <span style={{ ...nowrap, color: COLORS.text }}>{Math.round(temp)}°</span>}
+          {rain > 0 && <span style={{ ...nowrap, color: COLORS.accentInk }}>{rain.toFixed(1)}mm</span>}
           {curDark && (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: COLORS.faint }}>
+            <span style={{ ...nowrap, display: "inline-flex", alignItems: "center", gap: 3, color: COLORS.faint }}>
               <Icon name="moon" size={11} color={COLORS.faint} /> lights
             </span>
           )}
