@@ -15,7 +15,7 @@ import { reverseGeocode } from "./api/geocode";
 import { arrowDensityForZoom, type RawSegment } from "./layers/buildWindArrows";
 import type { GeometrySource } from "./math";
 import { buildFlowField, createFlowLineLayer, type FlowLine } from "./layers/FlowLineLayer";
-import { rankRoutes, routeMetrics, DEFAULT_PARAMS, type RouteOption, type RankCriterion } from "./routing/windRoute";
+import { rankRoutes, routeMetrics, type RouteOption, type RankCriterion } from "./routing/windRoute";
 import type { OutMsg } from "./routing/routingWorker";
 import TopBar from "./components/TopBar";
 import Legend from "./components/Legend";
@@ -29,6 +29,7 @@ import { cyclingAdvisory } from "./cyclist/advisory";
 import { bestRideWindow } from "./cyclist/bestWindow";
 import { forecastNote } from "./cyclist/routeCopy";
 import type { BestWindow } from "./cyclist/routeCopy";
+import { paramsFor, isBikeType, DEFAULT_BIKE, type BikeType } from "./cyclist/bikeTypes";
 import { reportError } from "./monitoring";
 import { Analytics } from "@vercel/analytics/react";
 import { glass, COLORS } from "./components/ui";
@@ -264,6 +265,25 @@ function tileKeysForBounds(m: TileManifest, west: number, south: number, east: n
   return keys;
 }
 
+// The rider's bike type survives reloads. Missing, unknown or unreadable (private
+// mode throws on access) all mean the default; the map is never gated on this.
+const BIKE_STORAGE_KEY = "cph-wind:bike";
+function readStoredBikeType(): BikeType {
+  try {
+    const v = localStorage.getItem(BIKE_STORAGE_KEY);
+    return isBikeType(v) ? v : DEFAULT_BIKE;
+  } catch {
+    return DEFAULT_BIKE;
+  }
+}
+function writeStoredBikeType(t: BikeType): void {
+  try {
+    localStorage.setItem(BIKE_STORAGE_KEY, t);
+  } catch {
+    // Storage unavailable: the choice still applies for this session.
+  }
+}
+
 function MapApp() {
   const isMobile = useIsMobile();
   // 30 fps on phones (now that 3D is off there's headroom for a livelier field),
@@ -322,6 +342,11 @@ function MapApp() {
   const [endLabel, setEndLabel] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [criterion, setCriterion] = useState<RankCriterion>("recommended");
+  const [bikeType, setBikeType] = useState<BikeType>(readStoredBikeType);
+  const chooseBikeType = useCallback((t: BikeType) => {
+    setBikeType(t);
+    writeStoredBikeType(t);
+  }, []);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -375,10 +400,10 @@ function MapApp() {
     const timer = setTimeout(() => {
       const reqId = ++reqIdRef.current;
       setRouteComputing(true);
-      workerRef.current!.postMessage({ type: "plan", reqId, start, end, wind: activeWind });
+      workerRef.current!.postMessage({ type: "plan", reqId, start, end, wind: activeWind, params: paramsFor(bikeType) });
     }, 150);
     return () => clearTimeout(timer);
-  }, [routing, start, end, activeWind]);
+  }, [routing, start, end, activeWind, bikeType]);
 
   // Rank by the rider's chosen criterion; the winner is the highlighted "best".
   const { sorted: rankedRoutes, bestId, windIsSimilar } = useMemo(
@@ -417,9 +442,10 @@ function MapApp() {
     if (!step || !rec) return null;
     return {
       at: new Date(step.time).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
-      deltaS: routeMetrics(rec.path, step.wind, DEFAULT_PARAMS).windDeltaS,
+      // Same params the worker planned with, so the re-priced hour is comparable.
+      deltaS: routeMetrics(rec.path, step.wind, paramsFor(bikeType)).windDeltaS,
     };
-  }, [rideWindow, forecast, recommendedOrder]);
+  }, [rideWindow, forecast, recommendedOrder, bikeType]);
 
   const selectedRoute =
     rankedRoutes.find((o) => o.id === selectedRouteId)
@@ -908,6 +934,8 @@ function MapApp() {
             windIsSimilar={windIsSimilar}
             bestWindow={bestWindow}
             forecastNote={routeForecastNote}
+            bikeType={bikeType}
+            onBikeType={chooseBikeType}
             isMobile={isMobile}
           />
         </div>

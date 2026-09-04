@@ -3,9 +3,10 @@
 // Presentational: all state lives in App, and every string or number the panel
 // says is decided in cyclist/routeCopy.ts. This file holds markup only.
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import type { RouteOption, RankCriterion } from "../routing/windRoute";
 import { formatWindDelta, verdictFor, type BestWindow } from "../cyclist/routeCopy";
+import { BIKE_TYPES, specFor, kmhFor, type BikeType } from "../cyclist/bikeTypes";
 import { glass, pill, COLORS, NUM } from "./ui";
 import { Icon } from "./Icon";
 import LocationSearch from "./LocationSearch";
@@ -53,6 +54,9 @@ interface Props {
   bestWindow: BestWindow | null;
   /** "Times below use the 16:00 forecast." — null when the selected hour is now. */
   forecastNote: string | null;
+  /** The rider's bike type; the footer control picks it. */
+  bikeType: BikeType;
+  onBikeType: (t: BikeType) => void;
   isMobile: boolean;
 }
 
@@ -87,8 +91,13 @@ export default function RoutePanel({
   onPickStart, onPickEnd, onClearStart, onClearEnd, onSwap,
   gpsLoading, gpsError,
   onUseGps, onReset, options, selectedId, onSelect,
-  criterion, onCriterion, recommendedOrder, windIsSimilar, bestWindow, forecastNote, isMobile,
+  criterion, onCriterion, recommendedOrder, windIsSimilar, bestWindow, forecastNote,
+  bikeType, onBikeType, isMobile,
 }: Props) {
+  // Whether the footer row is showing the four type buttons. Presentational only.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const bike = specFor(bikeType);
+
   if (!active) {
     return (
       <button
@@ -99,7 +108,7 @@ export default function RoutePanel({
         <Icon name="route" size={17} color={COLORS.accent} />
         <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, minWidth: 0 }}>
           <span>Plan a route</span>
-          <span style={{ fontSize: 12, fontWeight: 500, color: COLORS.dim }}>Search, tap the map, or use GPS</span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: COLORS.dim }}>Search, tap the map, or use GPS · {bike.label}</span>
         </span>
       </button>
     );
@@ -235,18 +244,41 @@ export default function RoutePanel({
       )}
 
       <div style={{ display: "flex", gap: 16, marginTop: 14 }}>
-        {/* Nothing to sort until there is more than one route. */}
-        {options.length > 1 && (
-          <button
-            onClick={() => onCriterion(sortingByWind ? "recommended" : "avgWind")}
-            aria-pressed={sortingByWind}
-            style={{ ...quietControl, color: sortingByWind ? COLORS.accent : COLORS.faint }}
-          >
-            Sort by wind
-          </button>
+        {pickerOpen ? (
+          // Tapping the bike control swaps the whole footer row for the four types;
+          // choosing one collapses it back. No modal, no select, no new vocabulary.
+          BIKE_TYPES.map((b) => (
+            <button
+              key={b.key}
+              onClick={() => { onBikeType(b.key); setPickerOpen(false); }}
+              aria-pressed={b.key === bikeType}
+              style={{ ...quietControl, color: b.key === bikeType ? COLORS.accent : COLORS.faint }}
+            >
+              {b.label}
+            </button>
+          ))
+        ) : (
+          <>
+            {/* Nothing to sort until there is more than one route. */}
+            {options.length > 1 && (
+              <button
+                onClick={() => onCriterion(sortingByWind ? "recommended" : "avgWind")}
+                aria-pressed={sortingByWind}
+                style={{ ...quietControl, color: sortingByWind ? COLORS.accent : COLORS.faint }}
+              >
+                Sort by wind
+              </button>
+            )}
+            <button
+              onClick={() => setPickerOpen(true)}
+              aria-expanded={false}
+              aria-label="Change bike type"
+              style={{ ...quietControl, ...NUM, color: COLORS.faint }}
+            >
+              {bike.label}, {kmhFor(bikeType)} km/h
+            </button>
+          </>
         )}
-        {/* Inert until the bike-type picker lands in step 6. */}
-        <span style={{ fontSize: 12, color: COLORS.faint }}>Commuter bike, 18 km/h</span>
       </div>
     </div>
   );
