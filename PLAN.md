@@ -1,6 +1,6 @@
 # cph-wind — Ranker fix and panel rebuild
 
-Written 2026-09-03. Scoped deliberately. Do the steps in order. Do the steps in order. Step 4 depends on step 1's tie flag and on step 2a's corrected wind.
+Written 2026-09-03, reviewed 2026-09-04. Scoped deliberately. Do the steps in order. Step 4 depends on step 1's tie flag and on step 2a's corrected wind.
 Step 3 exists because step 2a invalidated the scale it recalibrates.
 
 ---
@@ -838,49 +838,226 @@ reversed.
 
 ### Completed 2026-09-03 — commit `c5436b1`
 
-Branch `fix/map-legibility`, branched from `main` and rebased onto the bot's `818b0aa`. **116 tests**
-green, lint and build clean. `sizeForSpeed()` is now `clamp(3.2 + 1.5·v, 4, 14)` and reproduces the
-"proposed size" column above exactly. The dual encoding is written down in `FlowLineLayer.ts`.
-`SegmentTooltip` carries the `fallback` caveat.
+Branch `fix/map-legibility`. **It was branched from `feat/route-panel-redesign`, not from `main`**,
+so it carries steps 4 and 4b as well as step 5 (the panel commits reappear as `b905fbf`/`630ebc6`
+after the rebase onto the bot's `818b0aa`). Verified 2026-09-04 by test-merging into `main`: clean,
+and the only source difference from the panel branch is step 5's three files. **One PR from
+`fix/map-legibility` lands everything; `feat/route-panel-redesign` can be deleted after.** The
+earlier note here saying "branched from `main`" was wrong.
 
-**Item 4 was already done.** The stale `ROUTE_IMPACTS` comment was removed in step 3c, so that part
-of this spec described a state that no longer existed — the third time in this milestone that a spec
-has been written against a stale reading of the code. The commit only re-wrapped a ragged line there;
-no wording changed.
+**116 tests** green, lint and build clean — re-run independently 2026-09-04, same result.
+`sizeForSpeed()` is now `clamp(3.2 + 1.5·v, 4, 14)`. The dual encoding is written down in
+`FlowLineLayer.ts`. `SegmentTooltip` carries the `fallback` caveat.
 
-**Decimation: reported, not touched, as instructed.** Two mechanisms exist and neither is a bug for
-this step:
+**Item 4 was already done.** The stale `ROUTE_IMPACTS` comment was removed in step 3c; the commit
+only re-wrapped a ragged line there.
 
-- `arrowDensityForZoom` hides arrows below zoom 13, draws one per street from 13–16, and multiple
-  above 16.
-- A separate viewport cap — 650 streets on mobile, 1700 on desktop — takes every *n*th street from
-  the visible set.
+### Reviewed 2026-09-04 — the map was rendered headless, and item 1 did nothing below zoom 17
 
-Two consequences worth deciding on: the cap is a fixed street count regardless of zoom, so visual
-density changes with zoom for reasons unrelated to wind; and the stride is index-based over tile
-order rather than geographic, so which streets survive is arbitrary. Bigger arrows at the same
-density will read as more crowded, so these belong with the sizing second pass, not separately.
+The app was built and screenshotted in a headless Chromium (no basemap — that host is unreachable
+from the sandbox — but arrows, buildings and the panel all draw from local data). Two things the
+spec got wrong, both mine:
 
-**Still unverified visually** — nothing on the map has been seen:
+**`sizeForSpeed()` returns metres, not pixels.** `createFlowLineLayer` sets `sizeUnits: 'meters'`
+with `sizeMinPixels: 6` (8 on phones) and `sizeMaxPixels: 28`. The whole step 5 table above is
+labelled "px" and is wrong. At Copenhagen's latitude one pixel is 10.8 m at zoom 13, 1.35 m at 16,
+0.67 m at 17. Rendered size on a 4.4 m/s day (street p10 = 1.1 m/s, p90 = 3.17 m/s):
 
-1. arrow size at zoom 13, 16 and 17
-2. whether the six indigo bands are separable at those sizes
-3. the `fallback` caveat line in the tooltip
+| zoom | m/px | before step 5 | after step 5 |
+|---|---|---|---|
+| 13 – 16 | 10.8 – 1.35 | 6.0 – 6.0 px | 6.0 – 6.0 px |
+| 17 | 0.67 | 6.0 – 8.3 px | 7.2 – 11.8 px |
+| 18 | 0.34 | 10.8 – 16.7 px | 14.4 – 23.6 px |
 
-The size range stays a first guess until (1) and (2) are answered.
+Every arrow from zoom 13 to 16 sits on the 6 px floor, before and after. The size channel is dead
+across the four zoom levels a rider actually uses, and a 6 px anti-aliased arrow is where the
+ΔE 7.7 band separation stops reading. The screenshots show exactly that: specks at 13.5 and 15.5,
+readable arrows only at 17.5.
+
+**`arrowDensityForZoom` is only half wired.** `App.tsx` consumes `'hidden'` and nothing else;
+`'single'` and `'multi'` are computed and ignored, and `buildFlowField` always emits
+`ARROWS_PER_STREET = 3`. So at zoom 13.5 the 40 m spread is 5 px wide and three arrows draw on top
+of each other per street. The step 5 report's description of the density function was read from the
+function, not from its caller.
+
+Two smaller things the render showed, listed under 5b and 4c below: the forecast strip wraps its
+header at two-digit speeds, and the route panel's forecast note fires while the slider is still on
+"Now" for the second half of every hour.
+
+**Rendered and judged, so no longer a guess:** the size range and density rule in step 5b were
+tried on the same build and screenshotted at zoom 13.5, 15.5, 16.5 and 17.5, on a 4.4 m/s day and
+an 11 m/s day, desktop and a 390 px phone viewport. They read as a wind field at every zoom.
+DJ's screenshots on the real basemap are still wanted, but for taste, not for whether it works.
+
+---
+
+## Step 5b — Size arrows in pixels; finish the density rule
+
+Branch `fix/map-legibility`, on top of `c5436b1`. Two files: `src/layers/FlowLineLayer.ts` and
+`src/App.tsx`. Plus one chip fix and one deletion.
+
+**1. Pixel units.** A data glyph should encode the same value the same way at every zoom; only
+metre-sized glyphs need a zoom-dependent clamp, and that clamp is what killed the channel. In
+`createFlowLineLayer`: `sizeUnits: 'pixels'`, delete `sizeMinPixels` and `sizeMaxPixels`. In
+`sizeForSpeed`:
+
+```ts
+// Pixels. 8 px is the smallest size at which the arrowhead still resolves on a
+// light ground; 22 px is where arrows start to overlap at 'multi' density.
+function sizeForSpeed(speedMs: number): number {
+  return Math.max(8, Math.min(22, 8 + speedMs * 2.2));
+}
+```
+
+and `getSize: (d) => d.sizePx + (isMobile ? 2 : 0)` — phones are held further from the eye and
+the arrow is a touch target. Rename `sizeM` to `sizePx` everywhere it appears (the `FlowLine`
+field, its doc comment, `buildFlowField`, `getSize`). Rewrite the comment block above
+`sizeForSpeed` to say pixels; its second paragraph currently talks about "three pixels of size
+difference" against a metre formula, which is the confusion that produced this step.
+
+Rendered sizes: 1.1 m/s → 10.4 px, 3.17 → 15.0, 5 → 19, ≥ 6.4 → 22. On a 4.4 m/s day p10 and p90
+differ by 44 %; on an 11 m/s day the map is visibly bolder. Both were looked at.
+
+**2. Wire the density.** `buildFlowField(segments, wind, arrowsPerStreet = ARROWS_PER_STREET)`,
+and in `App.tsx` the call becomes `buildFlowField(visible, activeWind, density === "single" ? 1 : 3)`.
+`density` is already in that `useMemo`'s dependency list.
+
+At one arrow per street there is no neighbour to mask the conveyor's wrap-around fade, so with the
+existing `FADE = 0.18` a third of the field is half-transparent at any instant — rendered, and it
+reads as arrows randomly missing. So at `'single'` density the field is **static**: `travelLenM = 0`
+and `arrowAlpha` returns 1 when `d.travelLenM === 0`. The animation becomes a zoom-16-and-up
+feature; a static field was rendered at 13.5 and 15.5 and read well at both. This also cuts the
+per-frame CPU work by two thirds below zoom 16; leave the 650 / 1700 street cap where it is —
+visual density at 13.5 was judged right with one arrow per street.
+
+Add to `FlowLineLayer.test.ts` (create it if absent): `buildFlowField` with `arrowsPerStreet = 1`
+emits one entry per segment with `travelLenM === 0`; with 3, three entries with `phase` 0, ⅓, ⅔.
+
+**3. The forecast strip header wraps.** `TimeSlider.tsx` line ~64: at "11.0 m/s · gust 16 · 15°"
+the label "Wind forecast" breaks onto two lines and "m/s" drops under the number. Every `<span>` in
+that header row gets `whiteSpace: "nowrap"`; the value group gets `flexShrink: 0`; the label gets
+`flexShrink: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis"`. Data never wraps or
+clips; the label yields first. Widen the desktop strip from 320 to 340 px.
+
+**4. Delete the dead arrow layer.** `src/layers/WindFlowLayer.ts` is not imported anywhere, and
+`buildWindArrows.ts` is imported by the app only for `arrowDensityForZoom` and the `RawSegment`
+type. Delete `WindFlowLayer.ts`; in `buildWindArrows.ts` keep `RawSegment`, `ArrowDensity` and
+`arrowDensityForZoom`, delete the rest. `grep -rn` for every deleted export before committing; if
+anything in `src/` other than a test imports one, stop and report.
+
+`src/layers/buildWindArrows.test.ts` tests the dead `buildWindArrows()` and goes with it — **this
+is the one case where a test is deleted rather than obeyed**, because the code it pins is not
+called. Port its second case, "arrows point in the true wind vector, not the street axis", to
+`FlowLineLayer.test.ts` against `buildFlowField` (an open street at bearing 30 under a crosswind
+must have `flowDeg` more than 30° off the street axis). Its first case, carriageway confinement,
+tests lane geometry `FlowLineLayer` does not have; drop it. Two arrow layers with two size
+functions in two units is how step 5 went wrong.
+
+### Acceptance
+
+`npm run check`, `npm run build`. Then the three step 5 screenshots on the Vercel preview, taken by
+a human: zoom 13, 16, 17. What is being judged is taste — too dense, too bold — not whether the
+encoding works, which has been seen.
+
+One thing the headless render could not judge, because it had no basemap: the palest band,
+`deeply_sheltered` (130, 142, 202), measures 2.7 : 1 against the app's cream ground and 3.1 : 1
+against Positron's white streets — at and below the WCAG 3 : 1 line for graphical objects. If those
+arrows vanish on the real map, the fix is a darker top of the ramp with the ΔE gate in
+`windCategory.test.ts` re-run, as its own step. Not before it has been seen.
+
+---
+
+## Step 4c — The verdict is wrong on tailwind days, and the forecast note fires on "Now"
+
+Both found by rendering the panel with fixture winds. Both are spec errors from step 4; the
+implementation did what the spec said.
+
+**1. The forecast note.** `forecastNote()` compares the selected step's hour with the current hour.
+But `fetchCurrentWind` drops any step older than 30 minutes, so from :30 onward `forecast[0]` is the
+*next* hour and the note says "Times below use the 13:00 forecast." while the slider sits on "Now".
+It also renders with no routes under it. The rider's question is "did I scrub?", so ask that:
+
+- `App.tsx`: `forecastNote(step, now)` becomes `forecastIdx > 0 ? forecastNote(step) : null`.
+  `forecastNote(selectedHour: Date | null): string | null` loses its `now` argument and the
+  hour comparison. Keep the null-for-invalid-date case.
+- `RoutePanel.tsx`: render the note only when `options.length > 0`. It says "Times below".
+- Tests: update the `forecastNote` cases to the one-argument signature. The `forecastIdx === 0`
+  gate lives in `App.tsx`, which has no test harness — say so in the report rather than inventing
+  one.
+
+**2. The verdict.** Rendered on a 9 m/s WNW day riding Nørreport → Islands Brygge, every route
+saves 1 – 1½ min *with* the wind, and the panel said *"Wind costs about 0 s whichever way you go
+today. Take the short one."* — and, with a lighter hour ahead, *"Leave at 16:00 and it costs
+nothing."* Leaving later would lose the tailwind. Two causes: `verdictFor` floors the mean delta at
+zero because the spec's sentence said "costs"; and the "Leave at" clause never prices the route at
+that hour — `bestRideWindow()` scores wind + rain discomfort, so it can fire on "less rain" with
+identical wind.
+
+Also: `opts[0]` is whatever the *displayed* sort put first. With "Sort by wind" on, the verdict
+compares the shortest route against the least-windy one and can fall into the calm-day sentence on
+a windy day. The verdict is a statement about the day, not about the sort.
+
+Replace `verdictFor` with this decision table. `opts` is `rankRoutes(options, 'recommended').sorted`
+— `App.tsx` computes that once regardless of `criterion` and passes it as a separate prop
+`recommendedOrder`. `rec = opts[0]`, `shortest` = min `distanceM`, `mean` = mean `windDeltaS`,
+`extraS = shortest.timeS − rec.timeS`. `NEGLIGIBLE_S = 5` as now.
+
+| case | condition | sentence |
+|---|---|---|
+| A | `opts.length === 0` | `""` |
+| B | `!windIsSimilar && opts.length > 1 && extraS >= 1` | `The short way costs you an extra {extraS} today. Go round.` |
+| C | `!windIsSimilar` otherwise, `mean > NEGLIGIBLE_S` | `The short way is still the fastest today.` |
+| D | `windIsSimilar`, `mean > NEGLIGIBLE_S` | `Wind costs about {mean} whichever way you go today. Take the short one.` |
+| E | `mean < −NEGLIGIBLE_S` (any spread) | `The wind is with you today. Take the short one.` |
+| F | `abs(mean) ≤ NEGLIGIBLE_S` | `No wind to speak of today. Take the short one.` |
+
+Row order is precedence: B before E, so a tailwind day where a detour is still faster gets "Go
+round". C and E and F never say "costs".
+
+**The "Leave at" clause** attaches to C and D only — the two headwind rows — and only after
+re-pricing. In `App.tsx`, when `rideWindow` is set, compute
+`routeMetrics(rec.path, forecast[rideWindow.index].wind, DEFAULT_PARAMS).windDeltaS` on the main
+thread (`routeMetrics` is pure and `path` is plain data posted back from the routing worker) and
+pass `bestWindow = { at, deltaS }`. Then in `verdictFor`, with `deltaS` the re-priced cost:
+
+- `deltaS < NEGLIGIBLE_S` → clause `Leave at {at} and it costs nothing.`
+- `mean − deltaS >= 10` → clause `Leave at {at} and it costs about {deltaS}.`
+- otherwise no clause.
+
+For D the clause replaces "today. Take the short one."; for C it is appended after the sentence.
+So: *"Wind costs about 47 s whichever way you go. Leave at 16:00 and it costs about 12 s."* and
+*"The short way is still the fastest today. Leave at 16:00 and it costs nothing."*
+
+Tests in `routeCopy.test.ts`: one per row A–F and one per clause outcome, each built from a small
+fixture of two or three `RouteOption`s with hand-set `metrics`. `BestWindow` gains `deltaS: number`.
+Keep the existing `formatWindDelta` cases untouched.
+
+**3. "Sort by wind" with nothing to sort.** Render that control only when `options.length > 1`.
+The bike label stays — step 6 turns it into the picker.
+
+### Acceptance
+
+`npm run check`, `npm run build`. Screenshots on the preview: the empty panel (no note, no sort
+control), a route with the slider scrubbed one hour ahead (note present), and — if the day
+allows — a tailwind verdict.
 
 ---
 
 ## Step 6 — Bike-type picker
 
-Only after steps 1–5. Sets `baseSpeedMs` and `windSensitivity` together in `CyclingParams`:
+Only after 5b and 4c. Sets `baseSpeedMs` and `windSensitivity` together in `CyclingParams`:
 
-| type | baseSpeedMs | windSensitivity |
-|---|---|---|
-| City / omafiets | 4.2 (15 km/h) | 0.55 |
-| Commuter / hybrid *(default)* | 5.0 (18 km/h) | 0.50 |
-| Road bike | 7.2 (26 km/h) | 0.42 |
-| E-bike | 6.7 (24 km/h) | 0.15 |
+| key | label | baseSpeedMs | windSensitivity | maxSpeedMs |
+|---|---|---|---|---|
+| `city` | City bike | 4.2 (15 km/h) | 0.55 | 7.0 |
+| `commuter` | Commuter *(default)* | 5.0 (18 km/h) | 0.50 | 8.5 |
+| `road` | Road bike | 7.2 (26 km/h) | 0.42 | 11.0 |
+| `ebike` | E-bike | 6.7 (24 km/h) | 0.15 | 7.0 |
+
+`maxSpeedMs` is per type because `effectiveSpeed()` clamps to it: the default 8.5 would cap a road
+bike's tailwind gain at +1.3 m/s, and an EU e-bike's assist cuts at 25 km/h (6.9 m/s), so its
+tailwind gain is small by law, not by aerodynamics. `minSpeedMs` and `headwindThresholdMs` stay as
+they are for every type.
 
 E-bike is a separate row for a physical reason: the motor holds speed into a headwind, so wind costs
 battery range rather than legs and `windSensitivity` collapses toward zero.
@@ -891,13 +1068,47 @@ wind-independent, so it cancels completely out of the extra power a headwind cos
 equivalent-gradient readout, and there it runs backwards from intuition (2.68% at 70 kg, 1.70% at
 110 kg for the same wind).
 
+**Where it lives.** `src/cyclist/bikeTypes.ts`: the table above as `BIKE_TYPES`, a `BikeType` key
+union, and `paramsFor(key): CyclingParams` spreading `DEFAULT_PARAMS`. Test that every entry
+satisfies `minSpeedMs < baseSpeedMs < maxSpeedMs` and that `paramsFor('commuter')` equals
+`DEFAULT_PARAMS`.
+
+**How it reaches the router.** The worker plans with `DEFAULT_PARAMS` today. Add `params` to the
+`'plan'` message (`routingWorker.ts` `InMsg`), pass it through to `planRoutes(graph, s, g,
+msg.wind, msg.params)`, and include `bikeType` in the `useEffect` dependency list that posts the
+plan so a change re-plans. The step 4c re-pricing call in `App.tsx` uses the same params.
+
+**State.** `const [bikeType, setBikeType] = useState<BikeType>(readStoredBikeType)` in `App.tsx`,
+persisted to `localStorage` under `cph-wind:bike` inside try/catch; a missing or unknown value
+means `commuter`.
+
+**The control.** The inert `Commuter bike, 18 km/h` span in the panel footer becomes the picker.
+Same type, same `COLORS.faint`, same row — it is a `quietControl` button that reads
+`{label}, {km/h} km/h` and, when tapped, swaps the footer row for four quiet buttons (`City bike ·
+Commuter · Road bike · E-bike`, the active one in `COLORS.accent`), collapsing back on a choice. No
+modal, no select element, no new visual vocabulary. Also show the choice on the "Plan a route"
+launcher's second line: `Search, tap the map, or use GPS · Commuter`.
+
 Never gate the map behind the picker. Default first, adjust later.
+
+### Acceptance
+
+`npm run check`, `npm run build`. Screenshot the panel footer collapsed and expanded, and one
+route re-planned as a road bike beside the same route as a city bike — the minutes should differ,
+the distances should not.
 
 ---
 
+## Merge order
+
+1. Steps 5b and 4c both go on `fix/map-legibility`. One PR to `main` when both are recorded here.
+   `feat/route-panel-redesign` is a strict subset of it (verified 2026-09-04) — delete the branch
+   after the merge, do not merge it separately.
+2. Step 6 starts from `main` after that merge, on `feat/bike-type`.
+
 ## Verification before merge
 
-1. `npm run check` green (lint + `vitest run`), including both new regression cases. Never `npm test` — it is watch mode and hangs.
+1. `npm run check` green (lint + `vitest run`). Never `npm test` — it is watch mode and hangs.
 2. `npm run build` clean.
 3. Vercel preview deployed; paste the URL.
 4. Open the preview beside `wind-math-bench.html` (in `~/copenhagen-wind-map/`) with the same live

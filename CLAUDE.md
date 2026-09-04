@@ -1,7 +1,8 @@
 # cph-wind
 
 Live per-street wind for Copenhagen cyclists. React 19 + Vite + deck.gl + MapLibre.
-Data from Open-Meteo (wind) and OpenStreetMap (roads, buildings).
+Wind from MET Norway Locationforecast through the `/api/wind` proxy (`api/wind.ts`); roads and
+buildings from OpenStreetMap.
 
 **Read `PLAN.md` before starting work.** It carries the current milestone, the diagnosis behind each
 change, and the regression tests each step must satisfy.
@@ -28,6 +29,8 @@ bearing, **4.1 × 10⁻¹⁵ m/s** for resistance.
 - `headwindMs` is **positive for headwind**. This is the opposite of the usual physics convention and
   it is deliberate. Do not flip it.
 - Tests in `math/index.test.ts` pin all of this. If one fails, the change is wrong, not the test.
+  That rule is about the maths. A test that pins dead code goes when the code goes — `PLAN.md`
+  names the one such case.
 
 The one known defect in this file is documented as its own step in `PLAN.md`
 (`streetLevelWind()` is not applied inside `canyonModifiedWind()`). Fix it there, deliberately, with
@@ -38,8 +41,8 @@ the tests that step specifies. Do not fix it opportunistically while doing somet
 - Bearings: degrees clockwise from north, `[0, 360)`.
 - Wind direction is **meteorological** — the direction wind comes FROM. Always convert through
   `(directionDeg + 180) % 360` before comparing against a travel bearing.
-- Speeds are **m/s internally**. Open-Meteo returns km/h; convert at the API boundary in
-  `src/api/weather.ts` and never let km/h past it.
+- Speeds are **m/s internally**. MET returns m/s; if a source is ever added that does not, convert
+  at the API boundary in `src/api/weather.ts` and never let km/h past it.
 - `λ` (lambda) always means canyon aspect ratio H/W.
 - Tabular numerals (`NUM` in `components/ui.ts`) on every live number so values don't jitter.
 
@@ -56,9 +59,10 @@ Generated artefacts in `public/data/` are committed. `segtiles/` is the tiled fo
 
 ## Do not start a dev server, and do not try to render the app
 
-You cannot see this app and you do not need to. **Verification is a Vercel branch preview.** Commit,
-push the branch, and stop — Vercel builds it and a human takes the screenshots. That has been the
-loop for every step in `PLAN.md` and it works.
+You cannot see this app from here and you do not need to. The reviewer renders it headless on the
+Cowork side and writes what it saw into `PLAN.md`; that is where visual findings come from.
+**Verification is a Vercel branch preview.** Commit, push the branch, and stop — Vercel builds it
+and a human takes the screenshots. That has been the loop for every step in `PLAN.md` and it works.
 
 Two reasons not to fight this:
 
