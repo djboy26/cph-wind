@@ -2189,6 +2189,24 @@ street axis; Step 2b relies on that).
 **Copy** — `About.tsx`: "wind flowing along the street speeds up, wind across it dies down, and
 in a deep street it turns back on itself near the ground".
 
+### Completed 2026-09-06 — commit `eb391ed`, branch `feat/canyon-vortex`
+
+Branched from `main` at `614651b` (`Record ship`, the tip after the merge). Applied with `git apply --3way step8.patch`, clean:
+`src/math/index.ts` (the designated change to the guarded file), its tests, `About.tsx`. The
+patch file was deleted before the commit and never committed. `npm run check` green,
+**150 tests** (145 after the ship, plus 5). `npm run build` clean. `npm run shots -- step8`
+ended `PASS`; `docs/renders/step8/report.md` says `Basemap: loaded from CARTO.` No browser errors.
+Arrow counts: opening view 4561 desktop / 1031 phone; 16.5 → 1901; 17.5 → 2591;
+18.5 → 4101; 17.5 at pitch 40 → 3826; 17.5 phone → 1709 — the same seven numbers as Step 5g, as the lattice does not depend on the wind. The shared route
+planned 3 routes. Pushed with `-u`.
+
+Changed beyond the patch: nothing.
+
+For a person: a deep street under a cross wind. In `docs/renders/step8/` on this machine, the
+`nw9` set (9 m/s from 300°) at 18.5 on the boulevard is the one to look at — in the deep side
+streets the arrows should now point toward the windward wall, against the roof-level wind — and
+then the same street on the branch preview before the merge.
+
 ---
 
 ## Step 2b — second spec (2026-09-06): route on the canyon-modified wind
