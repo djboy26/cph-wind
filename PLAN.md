@@ -2299,6 +2299,17 @@ its label; no band or colour changes, so the colour-collision gate is untouched.
 headwind", −1.5 → "Light tailwind", 0.3 and −0.5 → "Neutral / crosswind", ±3 → the band's
 own label.
 
+### Completed 2026-09-06 — commit `fc58ea1`, branch `feat/canyon-vortex`
+
+Applied with `git apply --3way step9.patch` on `3d18920` (Record Step 2b), clean. The patch file
+was deleted before the commit and never committed. `npm run check` green, **158 tests**, the
+count the queue expects. `npm run build` clean. `npm run shots -- step9` ended `PASS`;
+`docs/renders/step9/report.md` says `Basemap: loaded from CARTO.` No browser errors. Counts: 17.5 →
+2591; 18.5 → 4101; the shared route planned 4 routes, canyonEdges 363142. Pushed.
+
+Changed beyond the patch: nothing. `gh` is not installed on this machine, so no PR was opened;
+`feat/canyon-vortex` is pushed and left unmerged — a physics change, for eyes before merge.
+
 ---
 
 ## Merge order — revised 2026-09-06
