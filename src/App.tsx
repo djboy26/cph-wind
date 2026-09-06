@@ -13,8 +13,8 @@ import type { Feature, FeatureCollection, LineString } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
 import { reverseGeocode } from "./api/geocode";
 import { arrowDensityForZoom, type RawSegment } from "./layers/buildWindArrows";
-import type { GeometrySource } from "./math";
-import { buildFlowField, createFlowLineLayer, type FlowLine } from "./layers/FlowLineLayer";
+import { offsetAlongBearing, type GeometrySource } from "./math";
+import { buildFlowField, createFlowLineLayer, roadWidthM, type FlowLine } from "./layers/FlowLineLayer";
 import { rankRoutes, routeMetrics, type RouteOption, type RankCriterion } from "./routing/windRoute";
 import type { OutMsg } from "./routing/routingWorker";
 import type { CanyonByWay } from "./routing/graph";
@@ -125,6 +125,16 @@ const MAX_ZOOM = 18.5;
 // (the slim file is ~42 MB, so we load it lazily, not on first paint).
 const BUILDINGS_MIN_ZOOM = 14;
 const BIKE_LANES_MIN_ZOOM = 15;
+// The carriageway the arrows sit on, drawn by the app from this zoom. The basemap draws
+// roads at a symbolic pixel width that at street zoom is a fraction of the real tarmac
+// (a 12 m carriageway is ~4 m wide on it at zoom 18.5), so a lattice that is right in
+// metres looks "outside the road". This band is exactly the width the lattice fills
+// (roadWidthM), so the arrows are inside it by construction. Below this zoom the
+// basemap's own roads are about the right width and the band would only add weight.
+const ROAD_BAND_MIN_ZOOM = 16;
+const ROAD_BAND_RGBA: [number, number, number, number] = [255, 255, 255, 240];
+const ROAD_CASING_RGBA: [number, number, number, number] = [222, 214, 199, 255];
+const ROAD_CASING_M = 1.2;
 // OSM cycleway values that mean "there is bike infrastructure on this road".
 const BIKE_LANE_TAGS = new Set(["track", "lane", "shared_lane", "separate", "segregated", "opposite_track", "opposite_lane", "designated"]);
 const BIKE_LANE_RGBA: [number, number, number, number] = [38, 140, 92, 210];
@@ -689,10 +699,12 @@ function MapApp() {
     }
   }, [tileManifest, boundsKey, tileCache]);
 
-  const flowLines = useMemo<FlowLine[]>(() => {
-    if (!tileManifest || !activeWind || !boundsKey || density === "hidden") return [];
+  // The street pieces inside the (padded) viewport, from the loaded tiles. Feeds the
+  // arrow field and the road band; recomputed when the view moves a tile-snap or a
+  // tile lands, not per frame.
+  const visibleSegments = useMemo<RawSegment[]>(() => {
+    if (!tileManifest || !boundsKey) return [];
     const [west, south, east, north] = boundsKey.split(",").map(Number);
-    // Gather streets from the loaded tiles intersecting the view, clipped to bounds.
     const visible: RawSegment[] = [];
     for (const key of tileKeysForBounds(tileManifest, west, south, east, north)) {
       const segs = tileCache[key];
@@ -701,10 +713,33 @@ function MapApp() {
         if (s.lon >= west && s.lon <= east && s.lat >= south && s.lat <= north) visible.push(s);
       }
     }
+    return visible;
+  }, [tileManifest, boundsKey, tileCache]);
+
+  const flowLines = useMemo<FlowLine[]>(() => {
+    if (!activeWind || density === "hidden" || visibleSegments.length === 0) return [];
     // deck.gl / MapLibre zoom is on 512 px tiles: m/px = 2*pi*R*cos(lat) / (512 * 2^z).
     const mpp = (78271.517 * Math.cos(viewState.latitude * Math.PI / 180)) / Math.pow(2, zoomQ);
-    return buildFlowField(visible, activeWind, { mpp, isMobile });
-  }, [tileManifest, activeWind, density, boundsKey, tileCache, zoomQ, viewState.latitude, isMobile]);
+    return buildFlowField(visibleSegments, activeWind, { mpp, isMobile });
+  }, [visibleSegments, activeWind, density, zoomQ, viewState.latitude, isMobile]);
+
+  // The road band under the arrows (see ROAD_BAND_MIN_ZOOM): one path per 30 m piece,
+  // in metres, the same width the lattice fills, with a casing so it reads as a road
+  // on the basemap's land colour. Rounded joins hide the piece boundaries.
+  const roadBandLayers = useMemo(() => {
+    if ((viewState.zoom ?? 0) < ROAD_BAND_MIN_ZOOM || visibleSegments.length === 0) return [] as Layer[];
+    const pieces = visibleSegments.map((s) => {
+      const half = (s.segmentLengthM ?? 30) / 2;
+      const a = offsetAlongBearing({ lon: s.lon, lat: s.lat }, s.bearingDeg, -half);
+      const b = offsetAlongBearing({ lon: s.lon, lat: s.lat }, s.bearingDeg, half);
+      return { path: [[a.lon, a.lat], [b.lon, b.lat]] as [number, number][], widthM: roadWidthM(s.classRank ?? 3, s.canyonW) };
+    });
+    const common = { data: pieces, getPath: (d: { path: [number, number][] }) => d.path, widthUnits: "meters" as const, capRounded: true, jointRounded: true, pickable: false };
+    return [
+      new PathLayer<{ path: [number, number][]; widthM: number }>({ ...common, id: "road-casing", getColor: ROAD_CASING_RGBA, getWidth: (d) => d.widthM + 2 * ROAD_CASING_M }),
+      new PathLayer<{ path: [number, number][]; widthM: number }>({ ...common, id: "road-band", getColor: ROAD_BAND_RGBA, getWidth: (d) => d.widthM }),
+    ];
+  }, [visibleSegments, viewState.zoom]);
 
   // A read-only probe for the screenshot harness (scripts/shots.mjs), so a run can
   // assert "arrows were drawn at this view" instead of eyeballing a PNG. Nothing in
@@ -854,8 +889,8 @@ function MapApp() {
   }, [roads, viewState.zoom]);
 
   const layers = useMemo(
-    () => [...buildingLayers, ...bikeLaneLayers, ...flowLineLayers, ...routeLayers],
-    [buildingLayers, bikeLaneLayers, flowLineLayers, routeLayers],
+    () => [...buildingLayers, ...roadBandLayers, ...bikeLaneLayers, ...flowLineLayers, ...routeLayers],
+    [buildingLayers, roadBandLayers, bikeLaneLayers, flowLineLayers, routeLayers],
   );
 
   // "Loaded" = the tile manifest is in and the first viewport tile has decoded

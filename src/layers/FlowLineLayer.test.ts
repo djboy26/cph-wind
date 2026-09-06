@@ -35,13 +35,13 @@ const open = (overrides: Partial<RawSegment> = {}) =>
   seg({ canyonH: 0, leftHeightM: 0, rightHeightM: 0, ...overrides });
 const wind: Wind = { speedMs: 5, directionDeg: 210 }; // blows toward 30°
 
-/** Zoom 18.5: 26 px is 4.4 m, so the pitch is 5 m. */
+/** Zoom 18 (0.17 m/px): 24 px is 4.1 m, so the pitch is 5 m. At 18.5 it is 3 m. */
 const CLOSE = { mpp: 0.17 };
-/** Zoom 17.5: 26 px is 8.8 m, pitch 9 m. */
+/** Zoom 17 (0.34 m/px): 24 px is 8.2 m, pitch 9 m. */
 const STREET = { mpp: 0.34 };
-/** Zoom 16.5: 26 px is 17.7 m, pitch 18 m. */
+/** Zoom 16 (0.68 m/px): 24 px is 16.3 m, pitch 17 m. */
 const MID = { mpp: 0.68 };
-/** Zoom 13.5: 26 px is 140 m, pitch 141 m. */
+/** Zoom 13 (5.4 m/px): 24 px is 130 m, pitch 130 m. */
 const FAR = { mpp: 5.4 };
 
 const K_LON = Math.cos(55.6761 * Math.PI / 180);
@@ -69,16 +69,17 @@ describe('pitchM', () => {
     for (const mpp of [0.17, 0.34, 0.68, 1.35, 2.7, 5.4]) {
       const p = pitchM(mpp);
       expect(Number.isInteger(p)).toBe(true);
-      expect(p / mpp).toBeGreaterThanOrEqual(26);
-      expect(p / mpp).toBeLessThan(26 + 1 / mpp + 1e-9); // within one metre of the target
+      expect(p / mpp).toBeGreaterThanOrEqual(24);
+      expect(p / mpp).toBeLessThan(24 + 1 / mpp + 1e-9); // within one metre of the target
     }
     expect(pitchM(0.17)).toBe(5);
     expect(pitchM(0.34)).toBe(9);
-    expect(pitchM(0.68)).toBe(18);
-    expect(pitchM(5.4)).toBe(141);
+    expect(pitchM(0.68)).toBe(17);
+    expect(pitchM(5.4)).toBe(130);
   });
   it('phones get two more pixels of pitch', () => {
-    expect(pitchM(0.34, true)).toBe(10);
+    expect(pitchM(0.34, true)).toBe(9);
+    expect(pitchM(0.68, true)).toBe(18);
   });
 });
 
@@ -95,15 +96,16 @@ describe('roadWidthM', () => {
 
 describe('rowOffsetsM', () => {
   it('fills the half-width with rows a pitch apart, centred, whole metres', () => {
-    expect(rowOffsetsM(6.5, 5)).toEqual([-5, 0, 5]); // an arterial at zoom 18.5
-    expect(rowOffsetsM(6.5, 9)).toEqual([-5, 5]); // the same at 17.5: two rows, ±4.5 rounded out
-    expect(rowOffsetsM(6.5, 18)).toEqual([0]); // and at 16.5: the centreline
+    expect(rowOffsetsM(6.5, 3)).toEqual([-6, -3, 0, 3, 6]); // an arterial at zoom 18.5 (3 m pitch)
+    expect(rowOffsetsM(6.5, 5)).toEqual([-5, 0, 5]); // at zoom 18
+    expect(rowOffsetsM(6.5, 9)).toEqual([-5, 5]); // at 17: two rows, ±4.5 rounded out
+    expect(rowOffsetsM(6.5, 17)).toEqual([0]); // and at 16: the centreline
     expect(rowOffsetsM(2, 5)).toEqual([0]); // a residential street: one row until the pitch is 4 m
     expect(rowOffsetsM(2, 4)).toEqual([-2, 2]);
     expect(rowOffsetsM(9.75, 5)).toEqual([-8, -3, 3, 8]);
   });
   it('rows are never closer than a pitch less the rounding, and always inside the half-width plus it', () => {
-    for (const halfW of [0, 1, 2, 3.5, 5, 6.5, 9.75]) for (const p of [4, 5, 7, 9, 18, 141]) {
+    for (const halfW of [0, 1, 2, 3.5, 5, 6.5, 9.75]) for (const p of [4, 5, 7, 9, 17, 130]) {
       const rows = rowOffsetsM(halfW, p);
       expect(rows.length).toBeGreaterThanOrEqual(1);
       for (let i = 1; i < rows.length; i++) expect(rows[i] - rows[i - 1]).toBeGreaterThanOrEqual(p - 1);
@@ -115,7 +117,7 @@ describe('rowOffsetsM', () => {
 
 describe('buildFlowField — the lattice', () => {
   it('a straight arterial alone is a complete grid: every column × every row, nothing thinned', () => {
-    // 60 m piece at 5 m pitch: columns at 0, 5, …, 60 (13); rows −5, 0, 5 → 39 arrows.
+    // 60 m piece at 5 m pitch (zoom 18): columns at 0, 5, …, 60 (13); rows −5, 0, 5 → 39 arrows.
     const field = buildFlowField([open({ classRank: 0, canyonW: 40 })], wind, CLOSE);
     const c = latticeCoords(field, 0, 60);
     expect(uniq(c.map((q) => q.across))).toEqual([-5, 0, 5]);
@@ -123,7 +125,7 @@ describe('buildFlowField — the lattice', () => {
     expect(field).toHaveLength(39);
   });
 
-  it('at street zoom the arterial carries two rows and a residential street one', () => {
+  it('at zoom 17 the arterial carries two rows and a residential street one', () => {
     const arterial = buildFlowField([open({ classRank: 0, canyonW: 40 })], wind, STREET);
     expect(uniq(latticeCoords(arterial, 0, 60).map((q) => q.across))).toEqual([-5, 5]);
     const residential = buildFlowField([open({ classRank: 3, canyonW: 20 })], wind, STREET);
@@ -138,7 +140,7 @@ describe('buildFlowField — the lattice', () => {
   });
 
   it('columns sit on multiples of the pitch measured from the way start, not the piece', () => {
-    // A piece from 40 m to 100 m at 9 m pitch carries the way marks 45, 54, …, 99.
+    // A piece from 40 m to 100 m at 9 m pitch (zoom 17) carries the way marks 45, 54, …, 99.
     const field = buildFlowField([open({ startM: 40 })], wind, STREET);
     expect(uniq(latticeCoords(field, 40, 60).map((q) => q.along))).toEqual([45, 54, 63, 72, 81, 90, 99]);
   });
@@ -237,19 +239,19 @@ describe('buildFlowField — contention between roads only', () => {
 });
 
 describe('buildFlowField — the glyph', () => {
-  it('every arrow is 19 px, 21 on a phone, whatever the wind or zoom', () => {
+  it('every arrow is 18 px, 20 on a phone, whatever the wind or zoom', () => {
     for (const z of [CLOSE, MID, FAR]) for (const speed of [1, 5, 12]) {
       const w = { ...wind, speedMs: speed };
-      for (const a of buildFlowField([open()], w, z)) expect(a.sizePx).toBe(19);
-      for (const a of buildFlowField([open()], w, { ...z, isMobile: true })) expect(a.sizePx).toBe(21);
+      for (const a of buildFlowField([open()], w, z)) expect(a.sizePx).toBe(18);
+      for (const a of buildFlowField([open()], w, { ...z, isMobile: true })) expect(a.sizePx).toBe(20);
     }
   });
 
-  it('opacity carries absolute strength: 0.55 + 0.45·min(v / 5, 1)', () => {
+  it('opacity carries absolute strength: 0.75 + 0.25·min(v / 5, 1)', () => {
     const at = (speed: number) => buildFlowField([open()], { ...wind, speedMs: speed }, MID)[0].alpha;
     // open street: street wind = 0.6 × ambient
-    expect(at(0)).toBeCloseTo(0.55, 6);
-    expect(at(5)).toBeCloseTo(0.55 + 0.45 * 0.6, 6);
+    expect(at(0)).toBeCloseTo(0.75, 6);
+    expect(at(5)).toBeCloseTo(0.75 + 0.25 * 0.6, 6);
     expect(at(20)).toBeCloseTo(1, 6);
   });
 });

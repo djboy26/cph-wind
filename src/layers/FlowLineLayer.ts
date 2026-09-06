@@ -40,7 +40,7 @@ export interface FlowLine {
   color: [number, number, number];
   /** Glyph size in pixels: the same for every arrow, at every zoom. */
   sizePx: number;
-  /** Base opacity 0.55–1 from absolute street-level speed (alphaForSpeed). */
+  /** Base opacity 0.75–1 from absolute street-level speed (alphaForSpeed). */
   alpha: number;
   /** Position along the ambient wind vector in brightness-wave wavelengths, 0..1. */
   phase: number;
@@ -82,8 +82,13 @@ function normalize(seg: RawSegment): SegmentInput {
 //
 // Do NOT "fix" this to size arrows by speed again, and do NOT make opacity a ratio:
 // that collapses the map to one channel and drops absolute strength from it.
+//
+// The floor is 0.75, not lower: the arrows sit on a white road band (App.tsx), and the
+// palest shelter colour only clears 3:1 on white at full opacity; at 0.55 it read as
+// 1.8:1 and calm-day arrows all but vanished. 0.75 keeps a calm day visibly lighter
+// than a gale while every band stays legible.
 function alphaForSpeed(speedMs: number): number {
-  return 0.55 + 0.45 * Math.max(0, Math.min(1, speedMs / 5));
+  return 0.75 + 0.25 * Math.max(0, Math.min(1, speedMs / 5));
 }
 
 export interface FlowFieldOptions {
@@ -95,9 +100,9 @@ export interface FlowFieldOptions {
 
 const M_PER_DEG_LAT = 111320;
 /** Target pitch between neighbouring arrows on screen, desktop; phones add PHONE_EXTRA_PX. */
-const PITCH_PX = 26;
-/** Every arrow is this long on screen: 0.73 of the pitch, closely packed, never touching. */
-const ARROW_PX = 19;
+const PITCH_PX = 24;
+/** Every arrow is this long on screen: 0.75 of the pitch, closely packed, never touching. */
+const ARROW_PX = 18;
 const PHONE_EXTRA_PX = 2;
 /** A road's own lattice is never thinned; only a duplicate point (a piece boundary, a sharp bend) is dropped. */
 const SAME_WAY_SEP = 0.5;
