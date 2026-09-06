@@ -17,6 +17,7 @@ import type { GeometrySource } from "./math";
 import { buildFlowField, createFlowLineLayer, type FlowLine } from "./layers/FlowLineLayer";
 import { rankRoutes, routeMetrics, type RouteOption, type RankCriterion } from "./routing/windRoute";
 import type { OutMsg } from "./routing/routingWorker";
+import type { CanyonByWay } from "./routing/graph";
 import TopBar from "./components/TopBar";
 import Legend from "./components/Legend";
 import SegmentTooltip from "./components/SegmentTooltip";
@@ -346,6 +347,10 @@ function MapApp() {
   const rideWindow = useMemo(() => bestRideWindow(forecast), [forecast]);
 
   const [roads, setRoads] = useState<FeatureCollection | null>(null);
+  // The per-way canyon table the router joins on (step 2b). null until the fetch
+  // answers; false when it failed, so routing still runs on the flat model that day.
+  const [canyonTable, setCanyonTable] = useState<CanyonByWay | null | false>(null);
+  const [canyonEdges, setCanyonEdges] = useState<number | null>(null);
   // Viewport-tiled segments: a manifest of which tiles exist, a cache of decoded
   // tiles, and an in-flight guard.
   const [tileManifest, setTileManifest] = useState<TileManifest | null>(null);
@@ -391,12 +396,12 @@ function MapApp() {
 
   // Spin up the worker and hand it the road network the first time routing opens.
   useEffect(() => {
-    if (!routing || !roads) return;
+    if (!routing || !roads || canyonTable === null) return;
     if (!workerRef.current) {
       workerRef.current = new Worker(new URL("./routing/routingWorker.ts", import.meta.url), { type: "module" });
       workerRef.current.onmessage = (e: MessageEvent<OutMsg>) => {
         const msg = e.data;
-        if (msg.type === "ready") setGraphReady(true);
+        if (msg.type === "ready") { setGraphReady(true); setCanyonEdges(msg.canyonEdges); }
         if (msg.type === "routes") {
           // Ignore results from a superseded request (rider moved a pin meanwhile).
           if (msg.reqId !== reqIdRef.current) return;
@@ -407,9 +412,9 @@ function MapApp() {
     }
     if (!graphSentRef.current) {
       graphSentRef.current = true;
-      workerRef.current.postMessage({ type: "init", roads });
+      workerRef.current.postMessage({ type: "init", roads, canyon: canyonTable || undefined });
     }
-  }, [routing, roads]);
+  }, [routing, roads, canyonTable]);
 
   useEffect(() => () => workerRef.current?.terminate(), []);
 
@@ -586,6 +591,10 @@ function MapApp() {
         .then((r) => { if (!r.ok) throw new Error(`Roads ${r.status}`); return r.json(); })
         .then((r) => { if (!cancelled) setRoads(r); })
         .catch((e) => { if (!cancelled) console.warn("Roads failed to load:", e); });
+      fetch("/data/canyon-by-way.json")
+        .then((r) => { if (!r.ok) throw new Error(`Canyon table ${r.status}`); return r.json(); })
+        .then((t) => { if (!cancelled) setCanyonTable(t); })
+        .catch((e) => { if (!cancelled) { console.warn("Canyon table failed to load; routing on the flat model:", e); setCanyonTable(false); } });
     };
     const win = window as unknown as {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
@@ -706,8 +715,9 @@ function MapApp() {
       arrows: flowLines.length,
       tiles: Object.keys(tileCache).length,
       windMs: activeWind?.speedMs ?? null,
+      canyonEdges,
     };
-  }, [zoomQ, flowLines, tileCache, activeWind]);
+  }, [zoomQ, flowLines, tileCache, activeWind, canyonEdges]);
 
   // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
   // footprints would choke the GPU. boundsKey already snaps to a coarse grid, so

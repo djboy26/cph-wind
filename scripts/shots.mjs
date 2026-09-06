@@ -142,9 +142,10 @@ for (const wind of WINDS) {
   await r.page.waitForTimeout(1500);
   await r.page.screenshot({ path: join(outDir, "panel-routes.png") });
   const nRoutes = await r.page.locator("button").filter({ hasText: /\d+ min/ }).count();
+  const canyonEdges = (await probe(r.page))?.canyonEdges ?? null; // step 2b: edges joined to the canyon table
   if (!routed) failed = true;
-  report.push({ name: "panel-routes", ok: routed, routes: nRoutes, basemap: r.basemap });
-  console.log(`${routed ? "ok  " : "FAIL"} panel-routes                 routes=${nRoutes}`);
+  report.push({ name: "panel-routes", ok: routed, routes: nRoutes, canyonEdges, basemap: r.basemap });
+  console.log(`${routed ? "ok  " : "FAIL"} panel-routes                 routes=${nRoutes}  canyonEdges=${canyonEdges}`);
   const picker = r.page.locator('button[aria-label="Change bike type"]');
   if (await picker.count()) {
     await picker.click();
@@ -174,7 +175,7 @@ const lines = [
   "",
   "| shot | ok | arrows | min | zoom | tiles | basemap ok/failed |",
   "|---|---|---|---|---|---|---|",
-  ...report.map((r) => `| ${r.name} | ${r.ok ? "yes" : "NO"} | ${r.arrows ?? (r.routes !== undefined ? `${r.routes} routes` : "")} | ${r.want ?? ""} | ${r.zoom ?? ""} | ${r.tiles ?? ""} | ${r.basemap ? `${r.basemap.ok}/${r.basemap.failed}` : ""} |`),
+  ...report.map((r) => `| ${r.name} | ${r.ok ? "yes" : "NO"} | ${r.arrows ?? (r.routes !== undefined ? `${r.routes} routes, canyonEdges ${r.canyonEdges}` : "")} | ${r.want ?? ""} | ${r.zoom ?? ""} | ${r.tiles ?? ""} | ${r.basemap ? `${r.basemap.ok}/${r.basemap.failed}` : ""} |`),
   "",
   errors.length ? `## Browser messages\n\n${[...new Set(errors)].map((e) => `- ${e}`).join("\n")}` : "No browser errors.",
   "",

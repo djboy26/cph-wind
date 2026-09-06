@@ -5,7 +5,7 @@
 // opposite head/tailwind.
 
 import type { FeatureCollection } from 'geojson';
-import { bearing, type LonLat } from '../math';
+import { bearing, type CanyonGeometry, type LonLat } from '../math';
 
 const MPER_DEG_LAT = 111_000;
 const DEG = Math.PI / 180;
@@ -21,7 +21,12 @@ export interface Edge {
   bearingDeg: number;
   wayId: string | number | undefined;
   highway: string;
+  /** Canyon geometry of the pipeline piece under this edge's midpoint; undefined = no data (open). */
+  canyon?: CanyonGeometry;
 }
+
+/** The per-way canyon table (public/data/canyon-by-way.json): wayId -> [[startM, heightM, widthM], …] sorted by startM. */
+export type CanyonByWay = Record<string, [number, number, number][]>;
 
 export interface RoutingGraph {
   nodeLon: Float64Array;
@@ -34,6 +39,8 @@ export interface RoutingGraph {
   component: Int32Array;
   /** Id of the largest component — the routable backbone (~98% of nodes). */
   mainComponent: number;
+  /** Directed edges that found a canyon piece in the table. */
+  canyonEdges: number;
 }
 
 function metersBetween(a: LonLat, b: LonLat): number {
@@ -43,7 +50,7 @@ function metersBetween(a: LonLat, b: LonLat): number {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-export function buildGraph(roads: FeatureCollection): RoutingGraph {
+export function buildGraph(roads: FeatureCollection, canyonByWay?: CanyonByWay): RoutingGraph {
   const idOf = new Map<string, number>();
   const lons: number[] = [];
   const lats: number[] = [];
@@ -66,12 +73,18 @@ export function buildGraph(roads: FeatureCollection): RoutingGraph {
   };
 
   let edgeCount = 0;
+  let canyonEdges = 0;
   for (const f of roads.features) {
     if (!f.geometry || f.geometry.type !== 'LineString') continue;
     const highway = (f.properties?.highway as string) || 'unclassified';
     if (EXCLUDED.has(highway)) continue;
     const wayId = f.properties?.id as string | number | undefined;
     const coords = f.geometry.coordinates as [number, number][];
+    // Pieces of this way, in along-way order, and one shared geometry object per piece.
+    const pieces = canyonByWay?.[String(wayId)];
+    const pieceGeom: CanyonGeometry[] = pieces ? pieces.map(([, heightM, widthM]) => ({ heightM, widthM })) : [];
+    let along = 0; // distance from the way's first node to the current vertex
+    let pi = 0; // last piece hit; pieces are sorted so the scan only moves forward
 
     for (let i = 0; i < coords.length - 1; i++) {
       const [lonA, latA] = coords[i];
@@ -85,8 +98,16 @@ export function buildGraph(roads: FeatureCollection): RoutingGraph {
       const B = { lon: lonB, lat: latB };
       const lengthM = metersBetween(A, B);
       const fwd = bearing(A, B);
-      adj[a].push({ to: b, lengthM, bearingDeg: fwd, wayId, highway });
-      adj[b].push({ to: a, lengthM, bearingDeg: (fwd + 180) % 360, wayId, highway });
+      let canyon: CanyonGeometry | undefined;
+      if (pieces) {
+        const mid = along + lengthM / 2;
+        while (pi + 1 < pieces.length && pieces[pi + 1][0] <= mid) pi++;
+        canyon = pieceGeom[pi];
+        canyonEdges += 2;
+      }
+      along += lengthM;
+      adj[a].push({ to: b, lengthM, bearingDeg: fwd, wayId, highway, canyon });
+      adj[b].push({ to: a, lengthM, bearingDeg: (fwd + 180) % 360, wayId, highway, canyon });
       edgeCount += 2;
     }
   }
@@ -133,6 +154,7 @@ export function buildGraph(roads: FeatureCollection): RoutingGraph {
     edgeCount,
     component,
     mainComponent,
+    canyonEdges,
   };
 }
 
