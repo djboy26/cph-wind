@@ -55,30 +55,46 @@ npm run data:rebuild    # fetch-osm -> fetch-buildings -> compute-cross-sections
 npm run data:validate
 ```
 
-Generated artefacts in `public/data/` are committed, except `cph-segments.json`, which is an intermediate that `tile-segments` and the validator read; regenerate it locally with `node scripts/compute-cross-sections.mjs`.
+Generated artefacts in `public/data/` are committed, except `cph-segments.json`, which is an intermediate that `tile-segments` and the validator read; regenerate it locally with `node scripts/compute-cross-sections.mjs`. `segtiles/` is the tiled form the app loads. `canyon-by-way.json` is the per-way canyon table the router joins on (Step 2b), rebuilt from the tiles by `npm run data:canyon`.
 
-## Do not start a dev server, and do not try to render the app
+## Rendering: `npm run shots`, and nothing else
 
-You cannot see this app from here and you do not need to. The reviewer renders it headless on the
-Cowork side and writes what it saw into `PLAN.md`; that is where visual findings come from.
-**Verification is a Vercel branch preview.** Commit, push the branch, and stop — Vercel builds it
-and a human takes the screenshots. That has been the loop for every step in `PLAN.md` and it works.
+You cannot look at this app from here, and you do not need to. The one sanctioned way to render
+it is the screenshot harness (`PLAN.md`, Step 7):
 
-Two reasons not to fight this:
+```
+npm run build && npm run shots -- <label>     # -> docs/renders/<label>/report.md + PNGs
+```
 
-- The harness resets the shell's working directory after every command, so `cd` does not persist.
-  The browser preview launcher resolves `launch.json` from wherever the shell lands, which is not
-  this repo. It has already started an unrelated project's dev server once.
-- A local render would only tell you the component mounts. `npm run build` already tells you that.
-  What a screenshot is *for* is judging a layout, and that judgement is not yours to make alone.
+It serves `dist/` itself, drives headless Chromium with the wind mocked, opens fixed views by URL
+hash, and **fails** when a view draws no arrows, a shared route is not planned, or the page
+throws. `report.md` is committed (the PNGs are ignored and stay on this machine for the
+reviewer); quote its numbers in the step's Completed block. The first run needs
+`npx playwright install chromium` once. If `report.md` says the basemap was NOT loaded, the
+machine is offline and the pictures prove nothing — stop.
 
-So: build, lint, test, commit, push. Say plainly in your report that the visual states are
-unverified and list which ones need eyes. Never write into another project's config to work around
-this.
+Do not start a dev server, do not `vite preview`, do not open a browser by any other route:
+
+- The shell's working directory resets after every command, so `cd` does not persist. The
+  browser preview launcher resolves `launch.json` from wherever the shell lands, which is not
+  this repo; it has already started an unrelated project's dev server once.
+- The harness answers "is it drawn?" objectively. Whether it *looks* right is still judged by a
+  person from the Vercel preview or production; say in your report which shots need eyes.
+
+Never write into another project's config to work around any of this.
+
+## Patches at the repo root
+
+`<step>.patch` files at the repo root are the reviewer's hand-off: the implementation of a step,
+built and verified on the review side. Apply with `git apply --3way <step>.patch`, delete the
+file, run the checks, commit. They are gitignored and never committed. If one does not apply
+cleanly, do not resolve it by hand: `git checkout -- .`, record it in `PLAN.md`, stop.
 
 ## Working style
 
 - Commit at each step boundary in `PLAN.md`, with the step named in the message.
+- Record each step under its heading in `PLAN.md` (`### Completed <date> — commit <hash>`, test
+  count, the harness numbers) and commit that as `Record Step <n>`.
 - `npm run check` and `npm run build` must both pass before any commit.
 - A GitHub Action pushes `chore: wind-validation sample [skip ci]` to `main` every few hours. Rebase
   rather than merge when it conflicts; it only touches data files.

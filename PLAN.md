@@ -1706,20 +1706,26 @@ git status --porcelain
 
 The only entries allowed are ` M PLAN.md`, ` M CLAUDE.md`, ` M .gitignore`, `?? .claude/`
 (Claude Code's own settings, untracked), and `??` lines for `*.patch` if they show. Anything
-else: stop and record it. Then:
+else: stop and record it. (The staged deletion of `public/arrowhead.svg` that stopped the first
+run was undone in `48d0307`; it should not show.) Then:
 
 ```
 git fetch origin
 git checkout fix/map-legibility
-git merge --ff-only origin/feat/bike-type
 git add PLAN.md CLAUDE.md .gitignore
-git commit -m "Plan: the 2026-09-06 queue (steps 5f, 7, ship, 8, 2b, 9)"
+git commit -m "Plan: the 2026-09-06 queue, resumed (steps 5f, 7, ship, 8, 2b, 9)"
+git cherry-pick -x 25aaac1
 git push
 ```
 
-The fast-forward is legal because `fix/map-legibility` (`6de9422`) is the parent of
-`feat/bike-type` (`25aaac1`, Step 6); it brings the bike-type picker onto this branch so there is
-one branch and one PR. If `--ff-only` refuses, stop: something moved.
+*(Amended after the first run, below: the tips had moved, so the fast-forward that stood here is
+replaced by a cherry-pick.)* `25aaac1` (Step 6, the bike-type picker) is the only commit
+`feat/bike-type` has that this branch lacks. It touches five files under `src/` and nothing
+else; this branch since `6de9422` touches `PLAN.md` only; so the cherry-pick is conflict-free.
+Rehearsed on the review side on `48d0307`: clean, and the whole patch chain then applies and
+ends at 154 tests. The docs are committed first so the working tree is clean when the
+cherry-pick runs. No rebase, no force-push; `feat/bike-type` is dead after this and is deleted
+at item 3 as written. If the cherry-pick reports a conflict, `git cherry-pick --abort` and stop.
 
 ### Run 2026-09-06 — stopped at preflight, before any command in this item ran
 
@@ -1749,6 +1755,12 @@ To resume: the arrowhead file needs nothing further. Decide how `feat/bike-type`
 branch now that the tips differ: `git rebase fix/map-legibility` on `feat/bike-type` (the commits between them are
 PLAN.md-only, so it is clean) and then the fast-forward as written, or a `--no-ff` merge instead
 of it. Item 0's `--ff-only` line refuses until one of those is done. Then rerun from item 0.
+
+**Resumed 2026-09-06 (reviewer).** Both findings correct; the stop was the right call, and the
+correction commit was the right repair. Neither of the two options above is taken: a rebase
+needs a force-push of `feat/bike-type`, which the rules forbid, and a merge commit adds a knot
+for one code commit. Item 0 now cherry-picks `25aaac1` instead (amended in place above, with
+the reasoning). Rerun from item 0.
 
 ### 1 — Step 5f
 
