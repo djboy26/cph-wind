@@ -1537,6 +1537,39 @@ opening view 2110 arrows on desktop, 494 on a phone; 16.5 → 1195; 17.5 → 178
 `Basemap: loaded from CARTO` — on DJ's machine the basemap must load; if the report says NOT
 loaded, the machine is offline and the run does not count.
 
+### Completed 2026-09-06 — commit `ef45854`
+
+Applied with `git apply --3way step7.patch` on `283f831` (Record Step 5f): `package.json` and
+`src/App.tsx` clean, the three script files as new files. The patch file was deleted before the
+commit and never committed. `npm install` wrote playwright into the lockfile; `npx playwright
+install chromium` put the browser in the user's cache, not the repo. `npm run check` green,
+**141 tests**, the count the queue expects. `npm run build` clean. `npm run shots -- step7`
+ended `PASS` after 5½ minutes; `docs/renders/step7/report.md` says `Basemap: loaded from
+CARTO.` — every view loaded all of its basemap tiles (19/0, 11/0 or 9/0 per view), no browser
+errors. 17 shots and the picker, on this machine. Pushed.
+
+**Arrow counts from `report.md`.** The same under both winds (4.4 m/s from 240° and 9 m/s
+from 300°), and each one equal to the review-side number to the arrow:
+
+| view | arrows | minimum |
+|---|---|---|
+| opening view, desktop (zoom 13.5) | 2110 | 200 |
+| opening view, phone (zoom 13) | 494 | 50 |
+| 16.5, H.C. Andersens Boulevard | 1195 | 200 |
+| 17.5 | 1788 | 200 |
+| 18.5 | 2569 | 100 |
+| 17.5 at pitch 40 | 2636 | 200 |
+| 17.5, phone | 1173 | 60 |
+| hint and empty panel (opening view) | 2110 | 200 and 0 |
+
+The shared route Nørreport → Islands Brygge planned its 3 options: 9 min / 2.46 km / +46 s into
+the wind, 10 min / 2.82 km / +51 s, 10 min / 2.87 km / +51 s, with the calm-day sentence
+("Wind costs about 49 s whichever way you go today. Take the short one."). The picker shot shows
+City bike / Commuter / Road bike / E-bike.
+
+Changed beyond the patch: nothing. The PNGs stayed on this machine in `docs/renders/step7/`
+(gitignored) for whoever reviews; only the report is in the commit.
+
 ---
 
 ## The canyon model, reviewed 2026-09-04
