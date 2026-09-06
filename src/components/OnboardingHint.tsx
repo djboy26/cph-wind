@@ -12,7 +12,7 @@ function seenBefore(): boolean {
 }
 
 const TIPS: { icon: IconName; text: string }[] = [
-  { icon: "search", text: "Zoom in for wind on every street" },
+  { icon: "search", text: "Zoom in for arrows on every street" },
   { icon: "tap", text: "Tap a street for headwind / tailwind" },
   { icon: "route", text: "Plan a route and compare it by wind" },
 ];

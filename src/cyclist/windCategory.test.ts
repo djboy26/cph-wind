@@ -8,6 +8,7 @@ import {
   shelterRatio,
   OPEN_STREET_RATIO,
   routeImpact,
+  impactLabel,
   streetImpact,
   type RGB,
 } from "./windCategory";
@@ -300,5 +301,22 @@ describe("WIND_BANDS palette gates", () => {
       expect(d, `${WIND_BANDS[i - 1].label} -> ${WIND_BANDS[i].label} is ΔE ${d.toFixed(1)}`)
         .toBeGreaterThanOrEqual(7);
     }
+  });
+});
+
+describe("impactLabel", () => {
+  // Inside the ±2 m/s neutral band a clear along-street component is named; the band
+  // itself (and its colour) stays neutral.
+  it("names a light headwind or tailwind inside the neutral band", () => {
+    expect(impactLabel(routeImpact(1.5), 1.5)).toBe("Light headwind");
+    expect(impactLabel(routeImpact(-1.5), -1.5)).toBe("Light tailwind");
+  });
+  it("keeps 'Neutral / crosswind' within ±0.5 m/s", () => {
+    expect(impactLabel(routeImpact(0.3), 0.3)).toBe("Neutral / crosswind");
+    expect(impactLabel(routeImpact(-0.5), -0.5)).toBe("Neutral / crosswind");
+  });
+  it("leaves every other band's label alone", () => {
+    expect(impactLabel(routeImpact(3), 3)).toBe("Headwind");
+    expect(impactLabel(routeImpact(-3), -3)).toBe("Tailwind");
   });
 });

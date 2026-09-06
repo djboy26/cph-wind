@@ -153,6 +153,16 @@ export function routeImpact(headwindMs: number): RouteImpactBand {
   return ROUTE_IMPACTS[ROUTE_IMPACTS.length - 1];
 }
 
+/**
+ * The band's label, except that inside the neutral band a clear along-street component is
+ * named for what it is: 1.5 m/s along the street is a light headwind or tailwind, not a
+ * crosswind. The band and its colour do not change.
+ */
+export function impactLabel(band: RouteImpactBand, headwindMs: number): string {
+  if (band.key !== "neutral" || Math.abs(headwindMs) <= 0.5) return band.label;
+  return headwindMs > 0 ? "Light headwind" : "Light tailwind";
+}
+
 const DEG = Math.PI / 180;
 
 export interface StreetImpact {
