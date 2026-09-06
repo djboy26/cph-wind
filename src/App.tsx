@@ -757,7 +757,6 @@ function MapApp() {
     return createFlowLineLayer({
       data: flowLines,
       time: flowPhase,
-      mpp: (78271.517 * Math.cos(viewState.latitude * Math.PI / 180)) / Math.pow(2, zoomQ),
       isMobile,
       // While planning a route, clicks set waypoints instead of pinning a street.
       onHover: isMobile || routing ? undefined : (info) => {
@@ -768,7 +767,7 @@ function MapApp() {
         return true;
       },
     });
-  }, [flowLines, flowPhase, isMobile, routing, zoomQ, viewState.latitude]);
+  }, [flowLines, flowPhase, isMobile, routing]);
 
   // Bike lanes from the same OSM download the router uses: dedicated cycleways as a
   // solid green line, roads with a track or lane as a thinner one. From zoom 15, so the

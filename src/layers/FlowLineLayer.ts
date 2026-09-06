@@ -1,13 +1,14 @@
 // src/layers/FlowLineLayer.ts
-// Wind shown as a field of arrows fixed to the roads: every way carries arrows at
-// fixed points every SPACING_M along it, thinned by zoom so neighbours stay PITCH_PX
-// apart on screen and never overlap. Each arrow POINTS in the local wind direction of
-// its street (the canyon-modified flowDeg), is COLOURED by shelter and made more or
-// less OPAQUE by absolute strength; every arrow is the same length. Nothing moves:
-// direction is animated as a soft brightness wave travelling downwind through the
-// field.
+// Wind shown as a lattice of short arrows fixed to every road: rows across the
+// carriageway and columns along it, one point every LATTICE_M metres in the road's
+// own frame, thinned by zoom so neighbours stay PITCH_PX apart on screen. Every arrow
+// is the same length; each POINTS in the local wind direction of its street (the
+// canyon-modified flowDeg), is COLOURED by shelter and made more or less OPAQUE by
+// absolute strength. The lattice belongs to the road and never moves; only the
+// arrows' direction comes from the wind. Direction is animated as a soft brightness
+// wave travelling downwind through the field.
 
-import { IconLayer, LineLayer } from '@deck.gl/layers';
+import { IconLayer } from '@deck.gl/layers';
 import type { Layer } from '@deck.gl/core';
 import {
   computeSegmentCenterWind,
@@ -28,19 +29,17 @@ const WAVELENGTH_CELLS = 6;
 export interface FlowLine {
   lon: number;
   lat: number;
-  /** Compass direction the wind flows TOWARD — the arrow points AND drifts this way. */
+  /** Compass direction the wind flows TOWARD — the arrow points this way. */
   flowDeg: number;
-  /** Street axis (deg CW from N) — used to place arrows along the centerline. */
+  /** Street axis (deg CW from N) — the lattice's frame. */
   bearingDeg: number;
-  /** Offset along the street (m) from the segment centre; 0 when on the lattice. */
+  /** Lattice offset along the street (m) from the piece's midpoint. */
   baseAlongM: number;
-  /** Arrow length in metres: the road's carriageway, floored at ARROW_MIN_PX on screen. */
-  lenM: number;
+  /** Lattice offset across the street (m), + to the right of the bearing. */
+  baseCrossM: number;
   color: [number, number, number];
-  /** Arrowhead size in pixels, scaled with the arrow's on-screen length. */
+  /** Glyph size in pixels: the same for every arrow, at every zoom. */
   sizePx: number;
-  /** Shaft width in pixels, likewise. */
-  shaftPx: number;
   /** Base opacity 0.55–1 from absolute street-level speed (alphaForSpeed). */
   alpha: number;
   /** Position along the ambient wind vector in brightness-wave wavelengths, 0..1. */
@@ -95,59 +94,56 @@ export interface FlowFieldOptions {
 }
 
 const M_PER_DEG_LAT = 111320;
-/** Arrows live at fixed points every SPACING_M along every way, from its first node. */
-const SPACING_M = 3;
-/** The closest two drawn arrows may be on screen; sets the zoom-dependent decimation. */
-const PITCH_PX = 28;
-/** Arrowhead and shaft scale with the arrow: head 15 % of its length within 12–36 px, shaft 3 % within 2–8 px. */
-const HEAD_MIN_PX = 12, HEAD_MAX_PX = 36, HEAD_OF_LENGTH = 0.15;
-const SHAFT_MIN_PX = 2, SHAFT_MAX_PX = 8, SHAFT_OF_LENGTH = 0.03;
-/** No two arrow centres closer than this fraction of PITCH_PX, whatever cell they fall in. */
+/** Lattice points every LATTICE_M along and across each way, in the way's own frame. */
+const LATTICE_M = 3;
+/** Target pitch between drawn arrows on screen; sets the zoom-dependent thinning. */
+const PITCH_PX = 34;
+/** Every arrow is this long on screen: 0.65 of the pitch, so neighbours never touch. */
+const ARROW_PX = 22;
+/** No two arrow centres closer than this fraction of the pitch, whatever cell they fall in. */
 const MIN_SEP = 0.75;
-/** An arrow spans its road's carriageway, but never draws shorter than this on screen. */
-const ARROW_MIN_PX = 16;
-/** Along-road spacing target as a fraction of the arrow's on-screen length (DJ's sketch: 0.4). */
-const SPACING_OF_LENGTH = 0.4;
-/** Two parallel arrows need this much perpendicular clearance, and this much tip-to-tail. */
-const CLEAR_ACROSS_PX = 24;
-const CLEAR_ALONG_PX = 12;
+/** Rows stay this far inside the carriageway edge. */
+const EDGE_MARGIN_M = 1.5;
 /** Carriageway width by class rank (0 arterial … 5 service), metres, when the canyon is wider. */
 const CLASS_ROAD_M = [16, 13, 10, 7, 3.5, 5];
 
-/** The carriageway an arrow spans: the class width, or half the canyon if that is wider, never more than the canyon. */
-function roadWidthM(rank: number, canyonW: number): number {
+/** The carriageway the lattice fills: the class width, or half the canyon if that is wider, never more than the canyon. */
+export function roadWidthM(rank: number, canyonW: number): number {
   const cls = CLASS_ROAD_M[Math.min(Math.max(rank, 0), 5)];
   if (rank >= 4) return Math.min(cls, canyonW || cls);
   return Math.min(canyonW || cls, Math.max(cls, 0.5 * canyonW));
 }
 
 /**
- * The arrow field. Every way carries candidate points at fixed world positions
- * i × SPACING_M from its first node (the pipeline gives each piece its startM), so an
- * arrow's coordinate never depends on the zoom or the viewport. Zooming out keeps
- * every k-th point, k = ceil(PITCH_PX / (SPACING_M / mpp)), so the drawn set at any
- * zoom is a subset of the set at any closer zoom and nothing ever shifts.
+ * The arrow field. Every way carries a lattice of points in its own frame: along the
+ * way at i × LATTICE_M from its first node (the pipeline gives each piece its
+ * startM), across it at j × LATTICE_M from the centreline, out to the carriageway
+ * edge. A point's coordinate never depends on zoom or viewport. Zooming out keeps
+ * every k-th row and column, k = ceil(PITCH_PX / (LATTICE_M / mpp)), so the pitch on
+ * screen stays within a few pixels of PITCH_PX at every zoom; which points are drawn
+ * changes with zoom, where they are does not — rows drop away as the road narrows on
+ * screen, positions never move.
  *
- * Where two ways come within PITCH_PX of each other on screen — a cycleway beside its
- * road, a dense block grid seen from far out — they share a PITCH_PX cell and the
- * higher-ranked way keeps it (arterial > residential > cycleway > service; then the
- * centre row, then the lower way id). Deterministic, so the same view always draws
- * the same arrows.
- *
- * Wide roads get lateral rows ROW_M apart out to CROSS_FRACTION of their canyon width
- * once zoomed in far enough for the rows to be more than a pitch apart.
+ * Where two ways come within a pitch of each other on screen — a cycleway beside its
+ * road, a junction, a block grid seen from far out — one candidate per PITCH_PX cell
+ * survives by rank (arterial > residential > cycleway > service, then the centre row,
+ * then the lower way id, then the lower index), and every survivor is then kept only
+ * if its centre is at least MIN_SEP × pitch from every centre already kept. Both
+ * passes are deterministic: the same view always draws the same arrows.
  */
 export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFieldOptions): FlowLine[] {
   const { mpp } = opts;
   if (segments.length === 0 || !(mpp > 0)) return [];
-  const bump = opts.isMobile ? 2 : 0;
+  const sizePx = ARROW_PX + (opts.isMobile ? 2 : 0);
   const lat0 = segments[0].lat * DEG;
   const mPerDegLon = M_PER_DEG_LAT * Math.cos(lat0);
   const cellM = PITCH_PX * mpp;
+  const k = Math.max(1, Math.ceil(cellM / LATTICE_M));
 
-  interface Cand { seg: SegmentInput; raw: RawSegment; cw: ReturnType<typeof computeSegmentCenterWind>; alongM: number; lenM: number; rank: number; i: number; cx: number; cy: number }
+  interface Cand { seg: SegmentInput; raw: RawSegment; cw: ReturnType<typeof computeSegmentCenterWind>; alongM: number; crossM: number; rank: number; j: number; i: number; cx: number; cy: number }
   const better = (a: Cand, b: Cand) =>
     a.rank !== b.rank ? a.rank < b.rank
+    : a.j !== b.j ? a.j < b.j
     : String(a.raw.wayId) !== String(b.raw.wayId) ? String(a.raw.wayId) < String(b.raw.wayId)
     : a.i < b.i;
   const cells = new Map<string, Cand>();
@@ -158,79 +154,51 @@ export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFie
     const startM = raw.startM ?? 0;
     const rank = raw.classRank ?? 3;
     const cw = computeSegmentCenterWind(seg, wind);
-
-    // The arrow spans the carriageway, floored on screen; its along-road spacing is a
-    // fraction of its length, but never so tight that parallel arrows touch. Two arrows
-    // s apart along the road, both pointing the same way at angle θ to the road, are
-    // s·sinθ apart across and s·cosθ apart along their own axis; either clearance will do.
-    const lenM = Math.max(ARROW_MIN_PX * mpp, roadWidthM(rank, seg.canyonW));
-    const lenPx = lenM / mpp;
-    const theta = Math.abs(((cw.flowDeg - seg.bearingDeg) % 180 + 180) % 180);
-    const sin = Math.sin(theta * DEG), cos = Math.abs(Math.cos(theta * DEG));
-    const sMinPx = Math.min(CLEAR_ACROSS_PX / Math.max(sin, 1e-3), (lenPx + CLEAR_ALONG_PX) / Math.max(cos, 1e-3));
-    const sPx = Math.max(PITCH_PX, SPACING_OF_LENGTH * lenPx, sMinPx);
-    const k = Math.max(1, Math.ceil((sPx * mpp) / SPACING_M));
-
-    const i0 = Math.ceil(startM / SPACING_M);
-    const i1 = Math.floor((startM + L) / SPACING_M);
+    const halfW = roadWidthM(rank, seg.canyonW) / 2 - EDGE_MARGIN_M;
+    const jMax = Math.max(0, Math.floor(halfW / LATTICE_M));
+    const i0 = Math.ceil(startM / LATTICE_M);
+    const i1 = Math.floor((startM + L) / LATTICE_M);
     for (let i = i0; i <= i1; i++) {
       if (i % k !== 0) continue;
-      const alongM = i * SPACING_M - startM - L / 2; // relative to the piece's midpoint
-      const p = offsetAlongBearing({ lon: seg.lon, lat: seg.lat }, seg.bearingDeg, alongM);
-      const xM = p.lon * mPerDegLon;
-      const yM = p.lat * M_PER_DEG_LAT;
-      const cx = Math.floor(xM / cellM);
-      const cy = Math.floor(yM / cellM);
-      const key = cx + ',' + cy;
-      const cand: Cand = { seg, raw, cw, alongM, lenM, rank, i, cx, cy };
-      const cur = cells.get(key);
-      if (!cur || better(cand, cur)) cells.set(key, cand);
+      const alongM = i * LATTICE_M - startM - L / 2; // relative to the piece's midpoint
+      const p0 = offsetAlongBearing({ lon: seg.lon, lat: seg.lat }, seg.bearingDeg, alongM);
+      for (let j = -jMax; j <= jMax; j++) {
+        if (j % k !== 0) continue;
+        const crossM = j * LATTICE_M;
+        const p = crossM === 0 ? p0 : offsetAlongBearing(p0, seg.bearingDeg + 90, crossM);
+        const xM = p.lon * mPerDegLon;
+        const yM = p.lat * M_PER_DEG_LAT;
+        const cx = Math.floor(xM / cellM);
+        const cy = Math.floor(yM / cellM);
+        const key = cx + ',' + cy;
+        const cand: Cand = { seg, raw, cw, alongM, crossM, rank, j: Math.abs(j), i, cx, cy };
+        const cur = cells.get(key);
+        if (!cur || better(cand, cur)) cells.set(key, cand);
+      }
     }
   }
 
-  // Second pass: a cell winner can still overlap a winner from another cell — a
-  // cycleway's arrow lying across its road's, or two long arrows near a junction. Treat
-  // every arrow as a capsule (its length plus CLEAR_ALONG tip to tail, CLEAR_ACROSS
-  // wide) and, taking winners in priority order, keep each only if its centre lies
-  // outside every kept capsule and no kept centre is within MIN_SEP × pitch. Both
-  // rules are deterministic, so the same view always draws the same arrows.
+  // Second pass: a cell winner can still sit a pixel from a winner across the cell
+  // edge, so enforce a true minimum separation between centres. Winners are taken in
+  // priority order; each is kept only if no already-kept centre in the 3 × 3
+  // neighbourhood is closer than MIN_SEP × pitch. Arrows are ARROW_PX long, under
+  // that separation, so kept arrows never touch.
   const minSep = MIN_SEP * cellM;
-  const clearAcross = CLEAR_ACROSS_PX * mpp;
-  const clearAlong = CLEAR_ALONG_PX * mpp;
-  interface Kept { x: number; y: number; ux: number; uy: number; half: number }
-  const kept = new Map<string, Kept[]>();
-  let maxHalf = 0; // longest half-length kept so far; bounds how far a clash can reach
+  const kept = new Map<string, { x: number; y: number }[]>();
   const winners = [...cells.values()].sort((a, b) => (better(a, b) ? -1 : better(b, a) ? 1 : 0));
   const accepted: Cand[] = [];
   for (const c of winners) {
-    const p = offsetAlongBearing({ lon: c.seg.lon, lat: c.seg.lat }, c.seg.bearingDeg, c.alongM);
-    const x = p.lon * mPerDegLon, y = p.lat * M_PER_DEG_LAT;
-    const half = c.lenM / 2;
-    const rad = c.cw.flowDeg * DEG;
-    const ux = Math.sin(rad), uy = Math.cos(rad);
-    // Overlap is tested in both arrows' frames: two arrows crossing at an angle can be
-    // clear along one axis and still cut through the other.
-    const cuts = (ex: number, ey: number, ax: number, ay: number, halves: number) =>
-      Math.abs(-ex * ay + ey * ax) < clearAcross && Math.abs(ex * ax + ey * ay) < halves;
-    // Cells to search: the longest kept half plus this half plus the gap, in cells.
-    const reach = Math.ceil((maxHalf + half + clearAlong) / cellM) + 1;
+    const [lon, lat] = arrowPosition({ lon: c.seg.lon, lat: c.seg.lat, bearingDeg: c.seg.bearingDeg, baseAlongM: c.alongM, baseCrossM: c.crossM });
+    const x = lon * mPerDegLon, y = lat * M_PER_DEG_LAT;
     let clash = false;
-    for (let dx = -reach; dx <= reach && !clash; dx++) for (let dy = -reach; dy <= reach && !clash; dy++) {
+    for (let dx = -1; dx <= 1 && !clash; dx++) for (let dy = -1; dy <= 1 && !clash; dy++) {
       const near = kept.get((c.cx + dx) + ',' + (c.cy + dy));
-      if (!near) continue;
-      for (const q of near) {
-        const ex = x - q.x, ey = y - q.y;
-        if (Math.hypot(ex, ey) < minSep) { clash = true; break; }
-        const halves = q.half + half + clearAlong;
-        if (cuts(ex, ey, q.ux, q.uy, halves) || cuts(ex, ey, ux, uy, halves)) { clash = true; break; }
-      }
+      if (near) for (const q of near) if (Math.hypot(q.x - x, q.y - y) < minSep) { clash = true; break; }
     }
     if (clash) continue;
     const key = c.cx + ',' + c.cy;
     const list = kept.get(key) ?? [];
-    list.push({ x, y, ux, uy, half });
-    kept.set(key, list);
-    maxHalf = Math.max(maxHalf, half);
+    list.push({ x, y }); kept.set(key, list);
     accepted.push(c);
   }
 
@@ -244,15 +212,11 @@ export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFie
     // phase is the arrow's position along the ambient wind vector, in wavelengths.
     const xM = (c.cx + 0.5) * cellM, yM = (c.cy + 0.5) * cellM;
     const phase = (((xM * waveX + yM * waveY) / (WAVELENGTH_CELLS * cellM)) % 1 + 1) % 1;
-    const lenPx = c.lenM / mpp;
     out.push({
       lon: c.seg.lon, lat: c.seg.lat,
       flowDeg: cw.flowDeg, bearingDeg: c.seg.bearingDeg,
-      baseAlongM: c.alongM, lenM: c.lenM,
-      color,
-      sizePx: Math.max(HEAD_MIN_PX, Math.min(HEAD_MAX_PX, HEAD_OF_LENGTH * lenPx)) + bump,
-      shaftPx: Math.max(SHAFT_MIN_PX, Math.min(SHAFT_MAX_PX, SHAFT_OF_LENGTH * lenPx)) + bump / 2,
-      alpha: alphaForSpeed(cw.speedMs), phase,
+      baseAlongM: c.alongM, baseCrossM: c.crossM,
+      color, sizePx, alpha: alphaForSpeed(cw.speedMs), phase,
       speedMs: cw.speedMs, gustMs: cw.gustMs,
       canyonH: c.seg.canyonH, canyonW: c.seg.canyonW,
       leftHeightM: c.seg.leftHeightM, rightHeightM: c.seg.rightHeightM,
@@ -262,21 +226,10 @@ export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFie
   return out;
 }
 
-/** The arrow's centre: on the road, alongM from the piece's midpoint. */
-function arrowCentre(d: FlowLine): { lon: number; lat: number } {
-  return offsetAlongBearing({ lon: d.lon, lat: d.lat }, d.bearingDeg, d.baseAlongM);
-}
-function arrowTail(d: FlowLine): [number, number] {
-  const p = offsetAlongBearing(arrowCentre(d), d.flowDeg + 180, d.lenM / 2);
-  return [p.lon, p.lat];
-}
-function arrowHead(d: FlowLine): [number, number] {
-  const p = offsetAlongBearing(arrowCentre(d), d.flowDeg, d.lenM / 2);
-  return [p.lon, p.lat];
-}
-/** Where the shaft stops: inside the head, so the tip is the glyph's own point. */
-function arrowShaftEnd(d: FlowLine, mpp: number): [number, number] {
-  const p = offsetAlongBearing(arrowCentre(d), d.flowDeg, d.lenM / 2 - 0.6 * d.sizePx * mpp);
+/** The arrow's centre: the piece's midpoint, then along the road, then across it. */
+function arrowPosition(d: Pick<FlowLine, 'lon' | 'lat' | 'bearingDeg' | 'baseAlongM' | 'baseCrossM'>): [number, number] {
+  const along = offsetAlongBearing({ lon: d.lon, lat: d.lat }, d.bearingDeg, d.baseAlongM);
+  const p = d.baseCrossM === 0 ? along : offsetAlongBearing(along, d.bearingDeg + 90, d.baseCrossM);
   return [p.lon, p.lat];
 }
 
@@ -291,9 +244,7 @@ function arrowAlpha(d: FlowLine, time: number): number {
 
 interface FlowLineLayerOpts {
   data: FlowLine[];
-  /** Metres per pixel, so the shaft can stop a head-length short of the tip. */
-  mpp: number;
-  /** Continuously increasing seconds — drives the conveyor. */
+  /** Continuously increasing seconds — drives the brightness wave. */
   time: number;
   /** Kept for the caller; the glyph size is decided in buildFlowField. */
   isMobile: boolean;
@@ -301,41 +252,23 @@ interface FlowLineLayerOpts {
   onClick?: (info: { object?: FlowLine; x: number; y: number }) => boolean;
 }
 
-/**
- * Two layers per field: a thin shaft from tail to tip, and a head glyph at the tip.
- * Both carry the same FlowLine objects, so picking either gives the tooltip its street.
- */
-export function createFlowLineLayer({ data, time, mpp, onHover, onClick }: FlowLineLayerOpts): Layer[] {
-  const rgba = (d: FlowLine): [number, number, number, number] => {
-    const a = arrowAlpha(d, time);
-    return [d.color[0], d.color[1], d.color[2], Math.round(255 * a)];
-  };
+/** One IconLayer: the arrow glyph, one size, rotated to the wind. */
+export function createFlowLineLayer({ data, time, onHover, onClick }: FlowLineLayerOpts): Layer[] {
   return [
-    new LineLayer<FlowLine>({
-      id: 'wind-flow-shafts',
-      data,
-      getSourcePosition: (d) => arrowTail(d),
-      getTargetPosition: (d) => arrowShaftEnd(d, mpp),
-      getColor: rgba,
-      getWidth: (d) => d.shaftPx,
-      widthUnits: 'pixels',
-      pickable: true,
-      onHover,
-      onClick,
-      updateTriggers: { getColor: time },
-    }),
     new IconLayer<FlowLine>({
-      id: 'wind-flow-heads',
+      id: 'wind-flow-arrows',
       data,
-      getIcon: () => 'head',
-      iconAtlas: '/arrowhead.svg',
-      // Anchor at the tip (x = 60 of 64) so the head ends exactly where the shaft does.
-      iconMapping: { head: { x: 0, y: 0, width: 64, height: 64, anchorX: 60, anchorY: 32, mask: true } },
+      getIcon: () => 'arrow',
+      iconAtlas: '/arrow.svg',
+      iconMapping: { arrow: { x: 0, y: 0, width: 64, height: 64, anchorX: 32, anchorY: 32, mask: true } },
       sizeUnits: 'pixels',
       getSize: (d) => d.sizePx,
-      getPosition: (d) => arrowHead(d),
+      getPosition: (d) => arrowPosition(d),
       getAngle: (d) => 90 - d.flowDeg,
-      getColor: rgba,
+      getColor: (d) => {
+        const a = arrowAlpha(d, time);
+        return [d.color[0], d.color[1], d.color[2], Math.round(255 * a)];
+      },
       pickable: true,
       billboard: false,
       onHover,
