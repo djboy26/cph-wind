@@ -1740,6 +1740,36 @@ opacity 0.75 floor. 21 tests in the file; 145 on main.
 on the boulevard — every arrow inside a white road, rows straight and complete, arrows a
 notch smaller than before; `=`×4 — two to three rows per carriageway.
 
+### Completed 2026-09-06 — commit `794e66e`, branch `fix/road-band`
+
+Cut from `main` at `96a0f9e` (after the second queue's item 0 carried PLAN.md onto main).
+Applied with `git apply --3way step5h.patch`, clean: `App.tsx`, `FlowLineLayer.ts` and its
+test, `scripts/shots.mjs`. The patch file was deleted before the commit and never committed.
+`npm run check` green, **145 tests**, the count the queue expects. `npm run build` clean.
+`npm run shots -- step5h` ended `PASS`; `docs/renders/step5h/report.md` says
+`Basemap: loaded from CARTO.` No browser errors. Pushed with `-u`.
+
+**Arrow counts from `report.md`**, this machine, against the review-side numbers:
+
+| view | arrows | review side |
+|---|---|---|
+| opening view, desktop | 5177 | 5177 |
+| opening view, phone | 1169 | 1169 |
+| 16.5, H.C. Andersens Boulevard | 2103 | 2103 |
+| 17.5 | 3177 | 3177 |
+| 18.5 | 6708 | 6708 |
+| 17.5 at pitch 40 | 4705 | 4705 |
+| 17.5, phone | 1709 | 1709 |
+
+17.5 is 0.0% off 3177 and 18.5 is 0.0% off 6708, inside the few percent the queue
+allows. The shared route planned 3 routes.
+
+Changed beyond the patch: nothing. The merge into `main` is recorded under the second queue.
+
+For a person, on production: maximum zoom on the boulevard — every arrow inside a white road,
+rows straight and complete, a notch smaller than before — and `=`×4, two to three rows per
+carriageway.
+
 ---
 
 ## The second queue — 2026-09-06 evening, auto mode
@@ -1828,6 +1858,35 @@ Under this heading add `### Shipped <date> — merges <hash>, <hash>`; commit as
 queue`; push. Final report: the commit hashes per item, the Basemap and Result lines from
 `step5h` and `physics`, the production URL, and the two shots that need eyes (the boulevard at
 maximum zoom and at `=`×4, both on production).
+
+### Run 2026-09-06 — stopped at `git merge main` (item 2): conflict in PLAN.md
+
+Item 0 ran as written: `bc13db9` on `feat/canyon-vortex`, `96a0f9e` on `main`, both pushed.
+Item 1 ran in full: `794e66e` Step 5h and `3891df0` Record Step 5h on `fix/road-band`;
+`git pull --ff-only origin main` fast-forwarded local `main` to `9aafa5e` (one bot commit had
+arrived); the merge `6c1c9bc` ("Merge fix/road-band: Step 5h") passed 145 tests and the build
+and was pushed — production carries the road band.
+
+Item 2: `git pull --ff-only origin feat/canyon-vortex` was already up to date; `git merge main`
+stopped with a conflict in PLAN.md only (1 conflict hunks). `scripts/shots.mjs`,
+`src/App.tsx`, `FlowLineLayer.ts` and its test, `docs/renders/step5h/report.md` and
+`validation-log.ndjson` auto-merged. Why, although item 0 made the two copies identical: the
+merge base of `main` and `feat/canyon-vortex` is `614651b` (where the branch was cut), whose
+PLAN.md predates the step 8, 2b and 9 records, Step 5h and this queue. Both sides insert all
+of that at the same places relative to that base, and `main` also has the Step 5h Completed
+block inside the insertion (`3891df0`), so git sees two different insertions at one point and
+refuses; identical copies merge trivially, copies that differ by one block do not.
+`git diff bc13db9 main -- PLAN.md`: 1 file changed, 30 insertions(+).
+
+`git merge --abort` restored the branch to `bc13db9`; nothing else was touched, no physics
+render ran, both branches still exist on origin. This commit, on `feat/canyon-vortex`, carries
+`main`'s PLAN.md (the branch's copy plus the Step 5h record) with this block added, so the
+branch's copy is now the superset.
+
+To resume, make the two copies identical again the way item 0 did, in the other direction —
+on `main`: `git checkout feat/canyon-vortex -- PLAN.md`, commit ("Plan: carry the branch's
+PLAN.md onto main"), push — and rerun item 2 from its first line; rehearsed here with a
+throwaway commit on top of `main`: the merge is then clean.
 
 ---
 
