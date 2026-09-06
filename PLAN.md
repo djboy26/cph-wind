@@ -1,6 +1,6 @@
 # cph-wind — Ranker fix and panel rebuild
 
-Written 2026-09-03, reviewed 2026-09-04. Scoped deliberately. Do the steps in order. Step 4 depends on step 1's tie flag and on step 2a's corrected wind.
+Written 2026-09-03, reviewed 2026-09-04, queued for auto mode 2026-09-06 (see "The queue" near the end). Scoped deliberately. Do the steps in order. Step 4 depends on step 1's tie flag and on step 2a's corrected wind.
 Step 3 exists because step 2a invalidated the scale it recalibrates.
 
 ---
@@ -290,6 +290,9 @@ above. Fold it into the next edit of this file.
 
 ## Step 2b — Route on the canyon-modified wind (NOT for auto mode)
 
+**Superseded 2026-09-06.** The join is decided and built; see "Step 2b — second spec" after the
+queue. The note below stands as the record of why it waited.
+
 `edgeHeadwind()` calls `resistance()`, which applies a flat 0.6 and ignores building geometry
 entirely. The router should use the same canyon-modified wind the arrows use.
 
@@ -317,7 +320,7 @@ Option 2 is the real fix and the largest change. Do not start any of them in aut
 
 ### Explicitly NOT in scope at all
 
-The canyon vortex. Above λ ≈ 0.65 real canyons enter skimming flow and street-level wind reverses
+*(The vortex became Step 8 on 2026-09-06, after the model review below.)* The canyon vortex. Above λ ≈ 0.65 real canyons enter skimming flow and street-level wind reverses
 relative to the flow above. The current transform can only shrink the cross component toward zero,
 never reverse it, so the signature behaviour of a deep canyon is absent. Adding it is a research task
 with its own validation burden. Do not attempt it here.
@@ -1461,19 +1464,65 @@ street with two or three on the wide ones. At 13.5 the arrows trace the network.
 
 ### Auto mode
 
-```
-git apply --3way step5f.patch && rm step5f.patch
-npm run check && npm run build
-git add -A && git commit
-```
-
-Also, in CLAUDE.md, put back the sentence the 5e edit dropped, at the end of the Data pipeline
-paragraph: "`segtiles/` is the tiled form the app loads." Same commit.
+Item 1 of "The queue" below; the commands live there. (The CLAUDE.md sentence the 5e edit
+dropped is back in the working copy and goes in with the queue's preflight commit.)
 
 ### Acceptance
 
-DJ's four shots, opening view / `=`×3 / `=`×4 / maximum zoom on Amager Boulevard, against
+The harness (Step 7) proves the arrows are drawn; the look is DJ's call from the production
+build after item 3: opening view / `=`×3 / `=`×4 / maximum zoom on Amager Boulevard, against
 panel 2 of the scratch. Then the pitch: 34 as built, or 28, or 40 — one number.
+
+---
+
+
+## Step 7 — The screenshot harness
+
+Every step so far has been judged from a Vercel preview by a person, or rendered headless on the
+review side. Neither is available to an autonomous run, so nothing objective has ever gated a
+commit on what the app draws. This step adds that gate: a script that builds nothing new, opens
+the built app in headless Chromium at fixed views with a fixed wind, and asserts that arrows were
+drawn and routes were planned before it writes a picture.
+
+`step7.patch` at the repo root is the implementation, built and run on the review side on top
+of `feat/bike-type` + `step5f.patch`; lint, 141 tests and the build pass, and the harness passes
+(17 shots, 3 routes, picker open). No data changes.
+
+**What it does.**
+
+- `scripts/shots.mjs` (`npm run shots -- <label>`) serves `dist/` on a free port
+  (`scripts/shots/serve.mjs`, no dependencies), mocks `/api/wind` with a MET-shaped fixture
+  (`scripts/shots/fixture.mjs`) and opens seven views × two winds (4.4 m/s from 240°, 9 m/s from
+  300°): the opening view on desktop and phone, zoom 16.5 / 17.5 / 18.5 at H.C. Andersens
+  Boulevard (55.6754, 12.5687) at pitch 0, 17.5 at pitch 40, and 17.5 on a phone. Then the
+  onboarding hint once, the empty route panel, a shared route with its three options, and the
+  bike-type picker when the build has one. Output: `docs/renders/<label>/*.png` (gitignored,
+  they stay on the machine for the reviewer) and `docs/renders/<label>/report.md` (committed).
+- Views are named in the URL hash so every run opens the same place:
+  `#z=17.5&lat=55.6754&lon=12.5687&pitch=0&bearing=0` (each key optional, clamped to the
+  camera limits) and `#s=55.6835,12.5713&e=55.6656,12.5786` for a route. `App.tsx` reads both
+  once at mount. The route form is what a rider can share too.
+- `App.tsx` exposes `window.__cphwind = { zoom, arrows, tiles, windMs }`, refreshed whenever the
+  field rebuilds. The harness polls it and **fails the run** (exit 1) when a view draws fewer
+  arrows than its minimum (200 on desktop street views, 100 at 18.5, 50–60 on a phone), when no
+  route option appears within 60 s, or when the page throws. Basemap tile failures are reported,
+  not fatal, so an offline machine still gets the app's own layers.
+- The onboarding hint is seeded as dismissed (`localStorage` `cphwind.onboarded.v1`) in every
+  context but the one that photographs it; clicking "Got it" from a script was flaky.
+- One real fix, found by the harness: a route named before the roads file had landed was never
+  planned, because the worker dropped a `plan` posted before `init`. `graphReady` is now state,
+  set on the worker's `ready` message, and the plan effect waits for it.
+
+**Numbers from the review-side run** (basemap blocked there, so the app's own layers only):
+opening view 2110 arrows on desktop, 494 on a phone; 16.5 → 1195; 17.5 → 1788; 18.5 → 2569;
+17.5 at pitch 40 → 2636; the shared route Nørreport → Islands Brygge gives 9 / 10 / 10 min.
+
+### Acceptance
+
+`npm run shots -- step7` prints `PASS`, and `docs/renders/step7/report.md` says
+`Basemap: loaded from CARTO` — on DJ's machine the basemap must load; if the report says NOT
+loaded, the machine is offline and the run does not count.
+
 ---
 
 ## The canyon model, reviewed 2026-09-04
@@ -1628,55 +1677,365 @@ spec are accepted. Items 1–5 above stand for DJ's eyes; the reload case cannot
 
 ---
 
-## Before the PR
+## The queue — 2026-09-06, auto mode
 
-~~One housekeeping edit: delete the stale step 5b paragraph above `sizeForSpeed()`.~~ **Done by
-the step 5d patch** — do not repeat it. What remains before the PR is the branch routine written
-into the auto-mode prompt of 2026-09-04 (evening): sync `PLAN.md` onto `fix/map-legibility` by
-cherry-pick, apply 5d there, record it, rebase `feat/bike-type` onto it.
+DJ, 2026-09-06: *"I do not want to take any actions on my own once it is set up. I want to run a
+long auto mode that progresses the project immensely."* So this run merges steps 1–7 to
+production on its own authority, gated by the harness, and leaves the physics change (steps 8,
+2b, 9) on a branch with an open PR. Every step below arrives as a patch at the repo root, built
+and verified on the review side; the whole chain was applied in order on a clean
+`feat/bike-type` checkout and ends at 154 tests, lint clean, build clean, harness PASS.
 
-### Run 2026-09-04 — stopped before item 0
+Items in order; every item ends with its checks green and a commit, or with a **Run** block
+under its heading saying where it stopped and why, and nothing else touched.
 
-The routine assumes one `PLAN.md`. There are two. `fix/map-legibility`'s copy ends at the Step 5c
-record (`9db4071`); `feat/bike-type` carries the Step 6 record (`6aa2de0`) and the review notes
-committed directly before this note. Items 4–7 write to `PLAN.md` on `fix/map-legibility` in the
-regions those notes rewrote ("Merge order", the Step 5c record), and item 7's target for
-`feat/bike-type` exists only on `feat/bike-type`. Item 8 then rebases `feat/bike-type` onto that:
-a `PLAN.md` conflict is near-certain, and the routine forbids hand-merging.
+**Rules for the whole run.** Never `npm test` (watch mode). Never `npm run dev`. Never commit a
+`.patch` (they are gitignored; `git apply` reads them regardless). Never `--force`; if a push is
+rejected, `git pull --rebase` and push again, and if that conflicts, stop. When an item stops,
+the items after it do not run. A commit message names its step. Push after every item. When a
+patch does not apply cleanly (`git apply --3way` reports a conflict), do not resolve it by hand:
+`git checkout -- .`, record, stop.
 
-The review notes were also uncommitted when the run began. The routine's failure rule,
-`git checkout -- .`, would have discarded them at item 1, where checking out `fix/map-legibility`
-refuses a dirty `PLAN.md` that differs between the branches. They were committed first, unchanged,
-so nothing was lost. No code was touched; both branches are clean.
+### 0 — Preflight
 
-To resume, either bring the two `PLAN.md`-only commits (`6aa2de0` and the review notes) onto
-`fix/map-legibility` so both branches hold the same document, then rerun the routine unchanged —
-item 8's rebase will then drop them as already upstream; or run items 4–7 on `feat/bike-type`
-after rebasing it, accepting that `fix/map-legibility`'s copy stays behind until it merges.
+If a folder named `cph-wind` exists inside this repo (a nested clone), stop. Then:
+
+```
+git status --porcelain
+```
+
+The only entries allowed are ` M PLAN.md`, ` M CLAUDE.md`, ` M .gitignore`, `?? .claude/`
+(Claude Code's own settings, untracked), and `??` lines for `*.patch` if they show. Anything
+else: stop and record it. Then:
+
+```
+git fetch origin
+git checkout fix/map-legibility
+git merge --ff-only origin/feat/bike-type
+git add PLAN.md CLAUDE.md .gitignore
+git commit -m "Plan: the 2026-09-06 queue (steps 5f, 7, ship, 8, 2b, 9)"
+git push
+```
+
+The fast-forward is legal because `fix/map-legibility` (`6de9422`) is the parent of
+`feat/bike-type` (`25aaac1`, Step 6); it brings the bike-type picker onto this branch so there is
+one branch and one PR. If `--ff-only` refuses, stop: something moved.
+
+### Run 2026-09-06 — stopped at preflight, before any command in this item ran
+
+Two things item 0 does not allow, found by its own checks:
+
+1. `git status --porcelain` shows `D  public/arrowhead.svg`: the file is deleted on disk and the
+   deletion is staged. It is not in the allowed list. It also blocks item 1 directly, because
+   `step5f.patch` deletes that file itself and cannot apply a deletion to a file that is already
+   gone. Nothing in this run removed it; the deletion was staged before the run began.
+2. Local `fix/map-legibility` is `87b4cd9` ("Add Step 5f: the road lattice", 2026-09-05 02:24,
+   PLAN.md only, never pushed), not `6de9422`. `feat/bike-type` (`25aaac1`) descends from
+   `6de9422`, so `git merge --ff-only origin/feat/bike-type` refuses. Checked with
+   `git merge-base --is-ancestor`, not by running the merge. Item 0 says: if it refuses, stop.
+
+Nothing else was touched: no fetch, no checkout, no merge, no patch applied; `.gitignore` and
+`CLAUDE.md` left as found, uncommitted. `git checkout -- .` was not run, because it would have
+discarded the queue text itself. This commit carries this block and the queue text PLAN.md
+already held.
+
+To resume: `git restore --staged public/arrowhead.svg && git restore public/arrowhead.svg`
+brings the file back from HEAD. Then decide how `feat/bike-type` joins this branch now that the
+tips differ: `git rebase fix/map-legibility` on `feat/bike-type` (the commits between them are
+PLAN.md-only, so it is clean) and then the fast-forward as written, or a `--no-ff` merge instead
+of it. Item 0's `--ff-only` line refuses until one of those is done. Then rerun from item 0.
+
+### 1 — Step 5f
+
+```
+git apply --3way step5f.patch
+rm step5f.patch
+npm run check
+npm run build
+git add -A
+git commit -m "Step 5f: the road lattice"
+git push
+```
+
+Expect **141 tests**. Then under "Step 5f" above add `### Completed 2026-09-06 — commit <hash>`
+with the test count; commit as `Record Step 5f`; push.
+
+### 2 — Step 7
+
+```
+git apply --3way step7.patch
+rm step7.patch
+npm install
+npx playwright install chromium
+npm run check
+npm run build
+npm run shots -- step7
+```
+
+`npm install` writes `playwright` into the lockfile from the `package.json` the patch changed;
+`npx playwright install chromium` downloads the browser the harness drives (one time, about
+150 MB, into the user's cache, not the repo). `npm run shots` must end with `PASS` **and**
+`docs/renders/step7/report.md` must say `Basemap: loaded from CARTO`. If it says NOT loaded, stop:
+the machine has no internet and nothing visual can be trusted. Expect 141 tests. On PASS:
+
+```
+git add -A
+git commit -m "Step 7: screenshot harness"
+git push
+```
+
+`git add -A` takes `package.json`, `package-lock.json`, the scripts, `App.tsx` and
+`docs/renders/step7/report.md`; the PNGs are ignored. Add the Completed block under Step 7 with
+the arrow counts from `report.md`; commit as `Record Step 7`; push.
+
+### 3 — Ship: `fix/map-legibility` → `main`
+
+Steps 1–7 go to production together. The gate is item 2's PASS on this machine plus the same
+checks on the merged tree:
+
+```
+git checkout main
+git pull --ff-only origin main
+git merge --no-ff fix/map-legibility -m "Merge fix/map-legibility: steps 1-7 (ranker, canyon boundary layer, scale, panel, lattice, bike types, harness)"
+npm run check
+npm run build
+npm run shots -- ship
+```
+
+`main` carries only the bot's `chore: wind-validation sample` commits since `630df8e`; they touch
+`validation-log.ndjson`, which no step touches, so the merge is conflict-free. If it is not,
+`git merge --abort` and stop. On green and `PASS`:
+
+```
+git add docs/renders/ship/report.md
+git commit -m "Record ship renders"
+git push origin main
+git push origin --delete feat/route-panel-redesign feat/bike-type
+```
+
+Pushing `main` deploys production. `feat/route-panel-redesign` is a strict subset of the merged
+branch (verified 2026-09-04) and `feat/bike-type` was fast-forwarded into it at item 0; both are
+dead. Under this heading add `### Shipped 2026-09-06 — merge <hash>`; commit as `Record ship`;
+push. If `gh` is installed and signed in (`gh auth status` exits 0), open the PR *before* the
+merge — `gh pr create --base main --head fix/map-legibility --title "Steps 1-7" --body "See
+PLAN.md, The queue, item 3."` — merge it with `gh pr merge --merge`, then `git checkout main &&
+git pull` and run the merged-tree checks there; the record and the branch deletions are the same.
+
+### 4 — Step 8, the canyon vortex
+
+```
+git checkout -b feat/canyon-vortex main
+git apply --3way step8.patch
+rm step8.patch
+npm run check
+npm run build
+npm run shots -- step8
+git add -A
+git commit -m "Step 8: vortex reversal in deep canyons"
+git push -u origin feat/canyon-vortex
+```
+
+Expect **146 tests**. Completed block under Step 8, `Record Step 8`, push.
+
+### 5 — Step 2b, routing on the canyon wind
+
+```
+git apply --3way step2b.patch
+rm step2b.patch
+npm run data:canyon
+npm run check
+npm run build
+npm run shots -- step2b
+git add -A
+git commit -m "Step 2b: route on the canyon-modified wind"
+git push
+```
+
+`npm run data:canyon` writes `public/data/canyon-by-way.json` from the committed tiles (expect
+`36946 ways, 159201 pieces, 2.55 MB`); it is committed by the `git add -A`. Expect **151 tests**
+and, in `docs/renders/step2b/report.md`, `canyonEdges 363142` on the panel-routes row (any
+value above 300,000 passes; below that, stop). Completed block, `Record Step 2b`, push.
+
+### 6 — Step 9, two lines of copy
+
+```
+git apply --3way step9.patch
+rm step9.patch
+npm run check
+npm run build
+npm run shots -- step9
+git add -A
+git commit -m "Step 9: hint and tooltip copy"
+git push
+```
+
+Expect **154 tests**. Completed block, `Record Step 9`, push. Then, if `gh` works:
+`gh pr create --base main --head feat/canyon-vortex --title "Steps 8, 2b, 9: canyon vortex, canyon routing, copy" --body "Physics change; needs eyes before merge. See PLAN.md."`
+**Do not merge this PR.** Without `gh`, leave the branch pushed. The last line of the final
+report is the PR URL or the branch name, and the report says which shots need a person's eyes:
+a deep street under a cross wind (Step 8) and the route panel (Step 2b).
 
 ---
 
-## Merge order
+## Step 8 — The canyon vortex: reverse the ground-level cross flow in deep streets
 
-1. `fix/map-legibility` carries steps 4, 4b, 5, 5b, 4c and 5c. One PR to `main` once DJ has seen
-   the lattice on the real basemap. `feat/route-panel-redesign` is a strict subset of it (verified
-   2026-09-04) — delete the branch after the merge, do not merge it separately.
-2. `feat/bike-type` (step 6) was cut from the tip of `fix/map-legibility`, not from `main`. Second
-   PR, after the first has merged; it then rebases onto `main` cleanly.
+The review of 2026-09-04 (table above) found one sign error: with the wind blowing across a deep
+street (λ > 0.65, Oke's skimming regime) a vortex fills the canyon and the flow at rider height
+runs *toward* the windward wall, opposite to the roof-level wind, at about 0.2–0.3 of the
+roof-level speed (Kastner-Klein & Rotach 2004, wind-tunnel canyon at λ = 1; Soulhac et al. 2008
+for the oblique case, where the same vortex sits under the along-axis flow: helical flow). The
+model shrinks the cross component toward zero and never reverses it. This step reverses it.
+`src/math/index.ts` is the guarded file; this is the deliberate, designated change to it.
+
+`step8.patch` is the implementation. **What it changes** in `canyonModifiedWind()`: the line
+
+```ts
+const crossFactor = Math.max(0.05, Math.exp(-1.8 * lambda));
+```
+
+becomes
+
+```ts
+const VORTEX_CROSS = -0.4;
+const t = smoothstep(0.5, 0.8, lambda);
+const crossFactor = (1 - t) * Math.max(0.05, Math.exp(-1.8 * lambda)) + t * VORTEX_CROSS;
+```
+
+with a module-level `smoothstep(a, b, x)` (0 below a, 1 above b, the cubic `u²(3 − 2u)`
+between). Why −0.4: the reversed ground flow is ~0.25 of roof level; roof level ≈ the 10 m wind
+here (H ≈ 15–20 m, z₀ = 0.03 m), and the cross component the factor multiplies is already
+0.6 × that, so −0.25 / 0.6 ≈ −0.4. Nothing else in the function changes: `alongFactor`, the 0.6
+applied once, the λ < 0.1 early return, the gust scaling and the direction reconstruction are
+as they were. The along-canyon factor is untouched because the vortex sits under the channelled
+flow; it does not replace it. The energy budget holds: |crossFactor| ≤ 0.41, alongFactor ≤ 1.45,
+so speed ≤ 0.6 × 1.45 × ambient.
+
+**Values** (cross factor on the rider-height cross component v = 0.6 U): λ = 0.3 → +0.58
+(unchanged); 0.5 → +0.41 (unchanged, t = 0); 0.6 → +0.15; 0.63 → +0.03; 0.65 → −0.05 (the
+flip); 0.7 → −0.22; 0.8 and above → −0.40. A 4.4 m/s wind straight across a λ = 1 street: today
+4.4 × 0.6 × 0.165 = 0.44 m/s toward the leeward wall; after, 4.4 × 0.6 × 0.4 = 1.06 m/s toward
+the windward wall. Shelter band 24 % of ambient, still "Deeply sheltered": only the arrow's
+direction changes. Routing sees nothing of it (the cross component projects to zero on the
+street axis; Step 2b relies on that).
+
+**Tests** — `describe('canyonModifiedWind — vortex (step 8)')` appended to
+`src/math/index.test.ts`; street bearing 0, ambient 8 m/s, v = 4.8:
+
+1. λ = 1, wind from 90°: direction within 1° of 270, speed 4.8 × 0.4 = 1.92 within 1e-9.
+2. λ = 0.3, wind from 90°: direction within 1° of 90, speed 4.8 × e^(−0.54) within 1e-9.
+3. λ = 0.5, wind from 90°: 4.8 × e^(−0.9) within 1e-9 (continuity at the blend's foot).
+4. λ = 1.2, wind from 45°: along = −v/√2 × 1.36, cross = −v/√2 × (−0.4); speed = √(along² +
+   cross²) = 4.8115 within 1e-6, direction from 343.6° within 0.1°. Written as the arithmetic.
+5. Continuity: λ from 0.30 to 1.20 in 0.01 steps, wind from 90°; the x-component of the travel
+   vector changes by < 0.25 m/s between neighbours (the blend's steepest slope gives ~0.19; a
+   hard flip would be ~2).
+6. Every existing test passes, including the energy budget over λ ≤ 2.5. One existing test is
+   amended, not deleted: `computeSegmentLanes › asymmetric canyon: edge lanes differ from center`
+   compared the two edge lanes' *speeds* (λ 1.53 and 0.47 by the lane-local geometry); after the
+   reversal the speeds happen to agree (2.40 vs 2.59 m/s) while the directions oppose, so it now
+   compares the two flow vectors (|Δ| > 0.5 m/s). The lane functions are not used by the app
+   since 5f (only `computeSegmentCenterWind` is); the test is kept for the maths.
+
+**Copy** — `About.tsx`: "wind flowing along the street speeds up, wind across it dies down, and
+in a deep street it turns back on itself near the ground".
+
+---
+
+## Step 2b — second spec (2026-09-06): route on the canyon-modified wind
+
+The 2026-09-03 note above asked for a human decision on the join. Decided: the graph gets a
+per-way table of canyon geometry keyed the way the pipeline already keys pieces (`wayId`,
+`startM`), derived from the committed tiles, so no Overpass call and no untracked file is
+involved. It is option 2's outcome (one source for arrows and routing) at option 3's cost.
+`step2b.patch` is the implementation; measured on the review side on real data.
+
+**1. The table** — `scripts/canyon-by-way.mjs`, `npm run data:canyon`. Reads
+`public/data/segtiles/index.json` and every tile it lists (fields by name from the manifest)
+and writes `public/data/canyon-by-way.json`:
+
+```
+{ "<wayId>": [[startM, heightM, widthM], …sorted by startM], … }
+```
+
+`heightM = (leftH + rightH) / 2`, `widthM = leftDist + rightDist`, both rounded to 0.1, keys
+`String(wayId)` (the roads file's numeric `id`). 36,946 ways, 159,201 pieces, 2.55 MB.
+Committed; the app fetches it.
+
+**2. The graph** — `routing/graph.ts`: `Edge` gains `canyon?: CanyonGeometry`;
+`buildGraph(roads, canyonByWay?)` keeps the cumulative distance from the way's first node while
+walking its coordinates and, for each edge, takes the piece with the largest `startM ≤` the
+edge's midpoint distance (a forward scan; pieces are sorted). Both directed edges of a pair share
+one `{ heightM, widthM }` object per piece. A way absent from the table leaves `canyon`
+undefined. `RoutingGraph` gains `canyonEdges`. The pipeline's along-way distance uses a fixed
+metres-per-degree at the city latitude and the graph's uses each edge's mean latitude; they
+differ by under 0.5 %, well inside a 30 m piece.
+
+**3. The wind on an edge** — `routing/windRoute.ts`, `edgeHeadwind` now:
+
+```ts
+const w = canyonModifiedWind(edge.bearingDeg, edge.canyon ?? OPEN, wind); // OPEN: heightM 0
+// headwind = −(travel vector of w · street unit vector); no streetLevelWind here — the
+// canyon path already applied the 0.6 once.
+```
+
+`resistance` is no longer imported there. `effectiveSpeed`, `edgeTimeS`, `routeMetrics`,
+`planRoutes` are unchanged and pick this up. On a channelled street a headwind is now up to
+45 % stronger than the flat model said, and so is a tailwind; a cross wind still costs nothing.
+
+**4. Loading** — `routingWorker.ts`: `InitMsg.canyon?`, `ReadyOut.canyonEdges`. `App.tsx`
+fetches `/data/canyon-by-way.json` in the idle callback that fetches the roads and posts `init`
+once both have answered; if the table fails to load it warns and routes on the flat model.
+`window.__cphwind.canyonEdges` carries the count; the harness records it on the panel-routes
+row.
+
+**Tests** — `routing/canyonJoin.test.ts`: (1) a synthetic 90 m way in three pieces with
+heights 5 / 20 / 5 over width 10 attaches λ 0.5 / 2 / 0.5 and `canyonEdges` = 6; (2) a way
+absent from the table has `canyon` undefined and `edgeHeadwind` equals
+`resistance(bearing, wind).headwindMs` within 1e-9 for wind from 0°, 45°, 90°, 225° — this pins
+"the 0.6 exactly once"; (3) λ = 1 heading north, wind from the north at 5 m/s: 5 × 0.6 × 1.3 =
+3.9 forward, −3.9 back; (4) same edge, wind from the east: 0 within 1e-9; (5) the committed table
+parses, has > 30,000 keys, and every way's rows are sorted by `startM`.
+
+**Measured on real data** (review side, 2026-09-06): 365,000 directed edges, 363,142 with a
+canyon (99.5 %). The shared route Nørreport → Islands Brygge at 4.4 m/s from 240°: wind cost
+46 / 51 / 51 s on the flat model, 56 / 62 / 69 s on the canyon model, and a fourth option
+appears (9.17 min, 2.47 km). Seconds, not minutes, as expected.
+
+---
+
+## Step 9 — Two lines of copy
+
+`step9.patch`. (1) `OnboardingHint.tsx`: "Zoom in for wind on every street" → "Zoom in for
+arrows on every street" — since 5e every street carries them; zooming makes them denser.
+(2) The tooltip nit from the 2026-09-04 review: a 1.5 m/s along-street wind was labelled
+"Neutral / crosswind". `windCategory.ts` gains `impactLabel(band, headwindMs)`: inside the
+neutral band, |h| > 0.5 m/s reads "Light headwind" / "Light tailwind"; every other band keeps
+its label; no band or colour changes, so the colour-collision gate is untouched.
+`SegmentTooltip.tsx` uses it for both chips. Tests in `windCategory.test.ts`: 1.5 → "Light
+headwind", −1.5 → "Light tailwind", 0.3 and −0.5 → "Neutral / crosswind", ±3 → the band's
+own label.
+
+---
+
+## Merge order — revised 2026-09-06
+
+1. `fix/map-legibility` (steps 1–7, with `feat/bike-type` fast-forwarded in) → `main`, by the
+   queue's item 3, on the harness gate.
+2. `feat/canyon-vortex` (steps 8, 2b, 9) → PR, left open. It changes what the arrows say in deep
+   streets under a cross wind and what the router charges on channelled streets; DJ looks at the
+   preview, the reviewer checks the renders, then it merges.
 
 ## Verification before merge
 
-1. `npm run check` green (lint + `vitest run`). Never `npm test` — it is watch mode and hangs.
+1. `npm run check` green. Never `npm test`.
 2. `npm run build` clean.
-3. Vercel preview deployed; paste the URL.
-4. Open the preview beside `wind-math-bench.html` (in `~/copenhagen-wind-map/`) with the same live
-   wind and confirm the head/tail verdict agrees on five named streets.
-5. Screenshot the route panel on a phone viewport, calm day and windy day.
-6. Deuteranopia simulation of one map screenshot.
+3. `npm run shots -- <label>` PASS with the basemap loaded; `report.md` committed.
+4. For the physics PR only: DJ's phone shots of a deep street under a cross wind, and the
+   comparison against `wind-math-bench.html` on five named streets, are still a person's job.
 
 ## Out of scope
 
-Validating the canyon model against ground truth. That needs DMI station data or manual anemometer
+Junction continuity and upstream wakes (see Step 2b's first note). Validating the canyon model against ground truth. That needs DMI station data or manual anemometer
 readings and is its own milestone. The meta description already claims "modified by urban canyon
 channeling around buildings" — that claim needs a residual number behind it eventually, but not in
 this change.
