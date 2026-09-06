@@ -1,6 +1,6 @@
 // src/components/SegmentTooltip.tsx
 import type { GeometrySource } from "../math";
-import { windBand, shelterRatio, streetImpact, type RGB } from "../cyclist/windCategory";
+import { windBand, shelterRatio, streetImpact, impactLabel, type RGB } from "../cyclist/windCategory";
 import { glass, COLORS, NUM } from "./ui";
 
 interface Props {
@@ -157,11 +157,11 @@ export default function SegmentTooltip({
           <>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
               <span style={{ color: COLORS.dim }}>Riding {compassPoint(impact.favorableBearingDeg)}</span>
-              <Chip color={impact.favorable.color} label={`${impact.favorable.label} ${impact.alongMs.toFixed(1)}`} />
+              <Chip color={impact.favorable.color} label={`${impactLabel(impact.favorable, -impact.alongMs)} ${impact.alongMs.toFixed(1)}`} />
             </div>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ color: COLORS.dim }}>Riding {compassPoint((impact.favorableBearingDeg + 180) % 360)}</span>
-              <Chip color={impact.against.color} label={`${impact.against.label} ${impact.alongMs.toFixed(1)}`} />
+              <Chip color={impact.against.color} label={`${impactLabel(impact.against, impact.alongMs)} ${impact.alongMs.toFixed(1)}`} />
             </div>
           </>
         )}

@@ -6,13 +6,15 @@
 // results, so the map keeps animating and panning smoothly while routes compute.
 
 import type { FeatureCollection } from 'geojson';
-import { buildGraph, nearestRoutableNode, type RoutingGraph } from './graph';
+import { buildGraph, nearestRoutableNode, type CanyonByWay, type RoutingGraph } from './graph';
 import { planRoutes, type CyclingParams, type RouteOption } from './windRoute';
 import type { Wind } from '../math';
 
 interface InitMsg {
   type: 'init';
   roads: FeatureCollection;
+  /** public/data/canyon-by-way.json; absent when it failed to load (flat model then). */
+  canyon?: CanyonByWay;
 }
 interface PlanMsg {
   type: 'plan';
@@ -29,6 +31,8 @@ type InMsg = InitMsg | PlanMsg;
 export interface ReadyOut {
   type: 'ready';
   nodeCount: number;
+  /** Directed edges that found a canyon piece; 0 without the table. */
+  canyonEdges: number;
 }
 export interface RoutesOut {
   type: 'routes';
@@ -44,8 +48,8 @@ ctx.onmessage = (e: MessageEvent<InMsg>) => {
   const msg = e.data;
 
   if (msg.type === 'init') {
-    graph = buildGraph(msg.roads);
-    ctx.postMessage({ type: 'ready', nodeCount: graph.nodeCount } satisfies OutMsg);
+    graph = buildGraph(msg.roads, msg.canyon);
+    ctx.postMessage({ type: 'ready', nodeCount: graph.nodeCount, canyonEdges: graph.canyonEdges } satisfies OutMsg);
     return;
   }
 

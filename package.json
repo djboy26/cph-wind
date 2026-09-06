@@ -13,6 +13,7 @@
     "check": "npm run lint && npm run test:run",
     "data:rebuild": "node scripts/fetch-osm.mjs && node scripts/fetch-buildings.mjs && node scripts/compute-cross-sections.mjs",
     "data:validate": "node scripts/validate-cross-sections.mjs",
+    "data:canyon": "node scripts/canyon-by-way.mjs",
     "shots": "node scripts/shots.mjs"
   },
   "dependencies": {

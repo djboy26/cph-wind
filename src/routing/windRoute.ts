@@ -3,7 +3,7 @@
 // handful of plausible A→B routes, annotate each with its wind cost, and flag the
 // best wind-wise one, leaving every option visible with its numbers.
 
-import { resistance, type Wind } from '../math';
+import { canyonModifiedWind, type CanyonGeometry, type Wind } from '../math';
 import { aStar, alternativeRoutes, type RoutePath } from './pathfind';
 import type { Edge, RoutingGraph } from './graph';
 
@@ -35,9 +35,18 @@ export const DEFAULT_PARAMS: CyclingParams = {
   headwindThresholdMs: 1.0,
 };
 
+const DEG = Math.PI / 180;
+/** No buildings: λ = 0, so canyonModifiedWind reduces to the flat boundary layer. */
+const OPEN: CanyonGeometry = { heightM: 0, widthM: 20 };
+
 /** Signed headwind for travelling along an edge (+ = headwind, − = tailwind), m/s. */
 export function edgeHeadwind(edge: Edge, wind: Wind): number {
-  return resistance(edge.bearingDeg, wind).headwindMs;
+  // canyonModifiedWind already puts the wind at rider height (the 0.6 applied once, see the
+  // note inside it); this must not call resistance(), which would apply it again.
+  const w = canyonModifiedWind(edge.bearingDeg, edge.canyon ?? OPEN, wind);
+  const travel = ((w.directionDeg + 180) % 360) * DEG;
+  const street = edge.bearingDeg * DEG;
+  return -(w.speedMs * Math.sin(travel) * Math.sin(street) + w.speedMs * Math.cos(travel) * Math.cos(street));
 }
 
 /** Effective cycling speed into a given headwind, m/s (clamped). */

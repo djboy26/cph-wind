@@ -42,6 +42,12 @@ export interface CanyonGeometry {
 
 const DEG = Math.PI / 180;
 const RAD = 180 / Math.PI;
+
+/** 0 below a, 1 above b, C¹-smooth cubic between. */
+function smoothstep(a: number, b: number, x: number): number {
+  const u = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return u * u * (3 - 2 * u);
+}
 const URBAN_BL_CORRECTION = 0.6;
 
 /**
@@ -187,7 +193,9 @@ export function canyonModifiedWind(
   // exponential cross-canyon blockage so skimming flow (λ≳0.65) funnels wind
   // along the street rather than across it.
   const alongFactor = 1 + 0.3 * Math.min(lambda, 1.5);
-  const crossFactor = Math.max(0.05, Math.exp(-1.8 * lambda));
+  const VORTEX_CROSS = -0.4;
+  const t = smoothstep(0.5, 0.8, lambda);
+  const crossFactor = (1 - t) * Math.max(0.05, Math.exp(-1.8 * lambda)) + t * VORTEX_CROSS;
 
   const modX = wAlong * alongFactor * Sx + wCrossX * crossFactor;
   const modY = wAlong * alongFactor * Sy + wCrossY * crossFactor;
