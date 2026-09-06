@@ -1885,6 +1885,34 @@ merge — `gh pr create --base main --head fix/map-legibility --title "Steps 1-7
 PLAN.md, The queue, item 3."` — merge it with `gh pr merge --merge`, then `git checkout main &&
 git pull` and run the merged-tree checks there; the record and the branch deletions are the same.
 
+### Run 2026-09-06 — stopped at `git pull --ff-only origin main`, before the merge
+
+`git checkout main` succeeded; `git pull --ff-only origin main` refused ("Not possible to
+fast-forward, aborting"). Local `main` is `8f54f73` ("Restructure Step 4 as panel-only; add
+Step 5 for map legibility", 2026-09-03 14:27, PLAN.md only, never pushed): one commit past
+`d46c000`, which is also where `fix/map-legibility` forks from `main`. `origin/main` is
+`a7a0dfd`: twenty bot commits (`chore: wind-validation sample [skip ci]`) past `d46c000` and
+nothing else, exactly as this item expects. Each tip has commits the other lacks, so there is no
+fast-forward.
+
+Item 2 finished in full before this (`ef45854` Step 7, `90c63f3` Record Step 7, both pushed).
+Nothing in this run touched `main`'s history or the remote: no merge ran, so there is nothing to
+abort; the tree is clean apart from the three unapplied patches and the step7 PNGs, which
+`main`'s older `.gitignore` lists as untracked. `git checkout -- .` had nothing to revert. Items
+4–6 not started. This block is committed on `fix/map-legibility`, where the queue lives; `main`'s
+PLAN.md predates the queue.
+
+What `8f54f73` is: `git cherry fix/map-legibility main` marks it patch-equivalent to a commit
+already on the branch, and 68 of its 72 added lines are in the branch's PLAN.md verbatim — the
+same edit, committed on `main` as well as on the branch that afternoon. Merging the branch into
+this local `main` would conflict in PLAN.md (`git merge-tree` dry run, exit 1), so the refusal
+spared the abort-and-stop the next paragraph of this item prescribes. Merging into `origin/main`
+is clean (dry run, exit 0).
+
+To resume: point local `main` at `origin/main` — from the branch, `git branch -f main
+origin/main`; nothing of `8f54f73` is lost, the branch carries it — then rerun item 3 from its
+first line. `--ff-only` is then a no-op and the merge is the clean one.
+
 ### 4 — Step 8, the canyon vortex
 
 ```
