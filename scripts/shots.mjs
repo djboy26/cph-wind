@@ -78,6 +78,18 @@ async function openPage(wind, vp, mobile, { onboarded = true } = {}) {
 
 const probe = (page) => page.evaluate(() => window.__cphwind ?? null);
 
+/**
+ * Screenshot through CDP rather than page.screenshot(): Playwright's wrapper waits on
+ * animation frames and times out on a software renderer where deck.gl runs at a
+ * frame a second; the raw capture returns the same pixels at once.
+ */
+async function snap(page, path) {
+  const cdp = await page.context().newCDPSession(page);
+  const { data } = await cdp.send("Page.captureScreenshot", { format: "png" });
+  await cdp.detach();
+  await writeFile(path, Buffer.from(data, "base64"));
+}
+
 /** Wait until the probe reports at least `min` arrows, or the deadline passes. */
 async function waitForArrows(page, min, ms = 30_000) {
   const t0 = Date.now();
@@ -104,7 +116,7 @@ for (const wind of WINDS) {
     await page.goto(`${base}/#${v.hash}`, { waitUntil: "networkidle", timeout: 90_000 });
     const p = await waitForArrows(page, v.arrows);
     await page.waitForTimeout(2500); // basemap tiles and the building layer stream in after the field
-    await page.screenshot({ path: join(outDir, `${v.name}-${wind.tag}.png`) });
+    await snap(page, join(outDir, `${v.name}-${wind.tag}.png`));
     record(`${v.name}-${wind.tag}`, p, basemap, v.arrows);
     await ctx.close();
   }
@@ -116,7 +128,7 @@ for (const wind of WINDS) {
   await page.goto(`${base}/`, { waitUntil: "networkidle", timeout: 90_000 });
   const p = await waitForArrows(page, 200);
   await page.waitForTimeout(1500);
-  await page.screenshot({ path: join(outDir, "hint-desktop.png") });
+  await snap(page, join(outDir, "hint-desktop.png"));
   record("hint-desktop", p, basemap, 200);
   await ctx.close();
 }
@@ -130,7 +142,7 @@ for (const wind of WINDS) {
   await waitForArrows(page, 1);
   await page.locator('button:has-text("Plan route")').first().click({ force: true });
   await page.waitForTimeout(800);
-  await page.screenshot({ path: join(outDir, "panel-empty.png") });
+  await snap(page, join(outDir, "panel-empty.png"));
   record("panel-empty", await probe(page), basemap, 0);
   await ctx.close();
 
@@ -140,7 +152,7 @@ for (const wind of WINDS) {
   const routeBtn = r.page.locator("button").filter({ hasText: /\d+ min/ }).first();
   const routed = await routeBtn.waitFor({ state: "visible", timeout: 60_000 }).then(() => true).catch(() => false);
   await r.page.waitForTimeout(1500);
-  await r.page.screenshot({ path: join(outDir, "panel-routes.png") });
+  await snap(r.page, join(outDir, "panel-routes.png"));
   const nRoutes = await r.page.locator("button").filter({ hasText: /\d+ min/ }).count();
   if (!routed) failed = true;
   report.push({ name: "panel-routes", ok: routed, routes: nRoutes, basemap: r.basemap });
@@ -149,7 +161,7 @@ for (const wind of WINDS) {
   if (await picker.count()) {
     await picker.click();
     await r.page.waitForTimeout(500);
-    await r.page.screenshot({ path: join(outDir, "panel-picker.png") });
+    await snap(r.page, join(outDir, "panel-picker.png"));
     console.log("ok   panel-picker");
   } else {
     console.log("skip panel-picker (no bike-type control in this build)");

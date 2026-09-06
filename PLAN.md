@@ -1740,6 +1740,36 @@ opacity 0.75 floor. 21 tests in the file; 145 on main.
 on the boulevard — every arrow inside a white road, rows straight and complete, arrows a
 notch smaller than before; `=`×4 — two to three rows per carriageway.
 
+### Completed 2026-09-06 — commit `794e66e`, branch `fix/road-band`
+
+Cut from `main` at `96a0f9e` (after the second queue's item 0 carried PLAN.md onto main).
+Applied with `git apply --3way step5h.patch`, clean: `App.tsx`, `FlowLineLayer.ts` and its
+test, `scripts/shots.mjs`. The patch file was deleted before the commit and never committed.
+`npm run check` green, **145 tests**, the count the queue expects. `npm run build` clean.
+`npm run shots -- step5h` ended `PASS`; `docs/renders/step5h/report.md` says
+`Basemap: loaded from CARTO.` No browser errors. Pushed with `-u`.
+
+**Arrow counts from `report.md`**, this machine, against the review-side numbers:
+
+| view | arrows | review side |
+|---|---|---|
+| opening view, desktop | 5177 | 5177 |
+| opening view, phone | 1169 | 1169 |
+| 16.5, H.C. Andersens Boulevard | 2103 | 2103 |
+| 17.5 | 3177 | 3177 |
+| 18.5 | 6708 | 6708 |
+| 17.5 at pitch 40 | 4705 | 4705 |
+| 17.5, phone | 1709 | 1709 |
+
+17.5 is 0.0% off 3177 and 18.5 is 0.0% off 6708, inside the few percent the queue
+allows. The shared route planned 3 routes.
+
+Changed beyond the patch: nothing. The merge into `main` is recorded under the second queue.
+
+For a person, on production: maximum zoom on the boulevard — every arrow inside a white road,
+rows straight and complete, a notch smaller than before — and `=`×4, two to three rows per
+carriageway.
+
 ---
 
 ## The second queue — 2026-09-06 evening, auto mode
