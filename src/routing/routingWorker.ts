@@ -7,7 +7,7 @@
 
 import type { FeatureCollection } from 'geojson';
 import { buildGraph, nearestRoutableNode, type RoutingGraph } from './graph';
-import { planRoutes, type RouteOption } from './windRoute';
+import { planRoutes, type CyclingParams, type RouteOption } from './windRoute';
 import type { Wind } from '../math';
 
 interface InitMsg {
@@ -21,6 +21,8 @@ interface PlanMsg {
   start: { lat: number; lon: number };
   end: { lat: number; lon: number };
   wind: Wind;
+  /** The rider's bike type as routing params (cyclist/bikeTypes.ts paramsFor). */
+  params: CyclingParams;
 }
 type InMsg = InitMsg | PlanMsg;
 
@@ -54,7 +56,7 @@ ctx.onmessage = (e: MessageEvent<InMsg>) => {
     }
     const s = nearestRoutableNode(graph, msg.start.lon, msg.start.lat);
     const g = nearestRoutableNode(graph, msg.end.lon, msg.end.lat);
-    const options = planRoutes(graph, s, g, msg.wind);
+    const options = planRoutes(graph, s, g, msg.wind, msg.params);
     ctx.postMessage({ type: 'routes', reqId: msg.reqId, options } satisfies OutMsg);
   }
 };

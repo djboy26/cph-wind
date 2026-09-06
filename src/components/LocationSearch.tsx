@@ -101,16 +101,18 @@ export default function LocationSearch({
 
   return (
     <div style={{ position: "relative" }}>
+      {/* Waypoint row, measured in PLAN.md step 4. The hairline underline (4b) says
+          "field" without reintroducing a container; unboxed, these read as static
+          text rather than something you can tap. */}
       <div
         style={{
-          display: "flex", alignItems: "center", gap: 9,
-          padding: "9px 11px", borderRadius: RADIUS.sm,
-          border: `1px solid ${open ? COLORS.accentLine : COLORS.line}`,
-          background: "rgba(255,255,255,0.62)",
-          transition: "border-color 160ms ease",
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "5px 0 8px",
+          background: "transparent",
+          borderBottom: `1px solid ${COLORS.line}`,
         }}
       >
-        <span style={{ width: 9, height: 9, borderRadius: "50%", background: dot, flex: "0 0 auto", boxShadow: `0 0 0 3px ${dotRing}` }} />
+        <span style={{ width: 7, height: 7, borderRadius: "50%", background: dot, flex: "0 0 auto", boxShadow: `0 0 0 3px ${dotRing}` }} />
         <input
           ref={inputRef}
           value={text}

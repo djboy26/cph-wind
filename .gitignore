@@ -26,3 +26,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+public/data/cph-segments.json
+
+# Reviewer hand-offs applied with `git apply --3way <name>.patch`; never committed
+/*.patch
+
+# Screenshot harness (scripts/shots.mjs): report.md per run is committed, the pictures stay local
+docs/renders/**/*.png
+docs/renders/**/*.txt

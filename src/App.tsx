@@ -9,13 +9,13 @@ import { Map as MapLibreMap } from "react-map-gl/maplibre";
 import type * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import type { FeatureCollection } from "geojson";
+import type { Feature, FeatureCollection, LineString } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
 import { reverseGeocode } from "./api/geocode";
 import { arrowDensityForZoom, type RawSegment } from "./layers/buildWindArrows";
 import type { GeometrySource } from "./math";
 import { buildFlowField, createFlowLineLayer, type FlowLine } from "./layers/FlowLineLayer";
-import { rankRoutes, type RouteOption, type RankCriterion } from "./routing/windRoute";
+import { rankRoutes, routeMetrics, type RouteOption, type RankCriterion } from "./routing/windRoute";
 import type { OutMsg } from "./routing/routingWorker";
 import TopBar from "./components/TopBar";
 import Legend from "./components/Legend";
@@ -27,6 +27,9 @@ import TimeSlider from "./components/TimeSlider";
 import AdvisoryChip from "./components/Advisory";
 import { cyclingAdvisory } from "./cyclist/advisory";
 import { bestRideWindow } from "./cyclist/bestWindow";
+import { forecastNote } from "./cyclist/routeCopy";
+import type { BestWindow } from "./cyclist/routeCopy";
+import { paramsFor, isBikeType, DEFAULT_BIKE, type BikeType } from "./cyclist/bikeTypes";
 import { reportError } from "./monitoring";
 import { Analytics } from "@vercel/analytics/react";
 import { glass, COLORS } from "./components/ui";
@@ -120,6 +123,11 @@ const MAX_ZOOM = 18.5;
 // 3D buildings: only fetch/render once the rider zooms in past the city overview
 // (the slim file is ~42 MB, so we load it lazily, not on first paint).
 const BUILDINGS_MIN_ZOOM = 14;
+const BIKE_LANES_MIN_ZOOM = 15;
+// OSM cycleway values that mean "there is bike infrastructure on this road".
+const BIKE_LANE_TAGS = new Set(["track", "lane", "shared_lane", "separate", "segregated", "opposite_track", "opposite_lane", "designated"]);
+const BIKE_LANE_RGBA: [number, number, number, number] = [38, 140, 92, 210];
+const BIKE_LANE_ON_ROAD_RGBA: [number, number, number, number] = [38, 140, 92, 130];
 const clampN = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 function constrainView<T extends { longitude?: number; latitude?: number; zoom?: number }>(vs: T): T {
   return {
@@ -128,6 +136,20 @@ function constrainView<T extends { longitude?: number; latitude?: number; zoom?:
     latitude: clampN(vs.latitude ?? COPENHAGEN.lat, GCPH.minLat, GCPH.maxLat),
     zoom: clampN(vs.zoom ?? 12, MIN_ZOOM, MAX_ZOOM),
   };
+}
+
+// A route can be named in the URL hash — #s=55.6835,12.5713&e=55.6656,12.5786 — so a
+// plan can be shared, and so the screenshot harness gets the same route every run
+// without a geocoder. Read once at mount; both ends must parse or neither counts.
+function sharedRouteFromHash(): { start: LatLon; end: LatLon } | null {
+  if (typeof location === "undefined") return null;
+  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const parse = (k: string): LatLon | null => {
+    const [lat, lon] = (h.get(k) ?? "").split(",").map(Number);
+    return Number.isFinite(lat) && Number.isFinite(lon) && lat > 55 && lat < 56 && lon > 12 && lon < 13 ? { lat, lon } : null;
+  };
+  const start = parse("s"), end = parse("e");
+  return start && end ? { start, end } : null;
 }
 
 function useIsMobile() {
@@ -143,7 +165,7 @@ function useIsMobile() {
 }
 
 // Continuously increasing seconds (wrapped well above any animation cycle).
-// The WindFlowLayer derives per-arrow drift from this, so keeping it smooth and
+// The FlowLineLayer derives per-arrow drift from this, so keeping it smooth and
 // unwrapped avoids visible jumps when arrows animate at different rates.
 //
 // Each tick re-renders the app, so we cap the emit rate via minIntervalMs (30 fps
@@ -222,8 +244,6 @@ const BOUNDS_PAD = 0.25;
 const MAX_SPAN_DEG = 0.12;
 // Each street gets a few arrows whose positions are recomputed per frame on the CPU,
 // so cap how many streets we draw (thinned evenly across the view) to stay smooth.
-const MAX_FLOW_STREETS_MOBILE = 650;
-const MAX_FLOW_STREETS_DESKTOP = 1700;
 
 // --- Segment tiles (built by scripts/tile-segments.mjs; loaded per viewport) ---
 // Streets are split into a spatial grid so the phone downloads only what's in view
@@ -231,13 +251,15 @@ const MAX_FLOW_STREETS_DESKTOP = 1700;
 // widthM / canyon / lanes are recomputed here.
 interface TileManifest { tileDeg: number; minLon: number; minLat: number; tiles: Set<string>; }
 const GEOM_SRC = ["measured", "partial", "fallback"] as const;
-type SegTuple = [number, number, number, number, number, number, number, number, number, string | number | null];
+type SegTuple = [number, number, number, number, number, number, number, number, number, string | number | null, number?, number?];
 
 function decodeSeg(t: SegTuple): RawSegment {
-  const [lon, lat, bearingDeg, segLen, leftDist, rightDist, leftH, rightH, geomSrc, wayId] = t;
+  const [lon, lat, bearingDeg, segLen, leftDist, rightDist, leftH, rightH, geomSrc, wayId, startM, classRank] = t;
   const widthM = leftDist + rightDist;
   return {
     wayId: wayId ?? undefined,
+    startM: startM ?? 0,
+    classRank: classRank ?? 3,
     lon, lat, bearingDeg, segmentLengthM: segLen,
     widthM, leftDistM: leftDist, rightDistM: rightDist,
     leftHeightM: leftH, rightHeightM: rightH,
@@ -257,6 +279,25 @@ function tileKeysForBounds(m: TileManifest, west: number, south: number, east: n
   return keys;
 }
 
+// The rider's bike type survives reloads. Missing, unknown or unreadable (private
+// mode throws on access) all mean the default; the map is never gated on this.
+const BIKE_STORAGE_KEY = "cph-wind:bike";
+function readStoredBikeType(): BikeType {
+  try {
+    const v = localStorage.getItem(BIKE_STORAGE_KEY);
+    return isBikeType(v) ? v : DEFAULT_BIKE;
+  } catch {
+    return DEFAULT_BIKE;
+  }
+}
+function writeStoredBikeType(t: BikeType): void {
+  try {
+    localStorage.setItem(BIKE_STORAGE_KEY, t);
+  } catch {
+    // Storage unavailable: the choice still applies for this session.
+  }
+}
+
 function MapApp() {
   const isMobile = useIsMobile();
   // 30 fps on phones (now that 3D is off there's headroom for a livelier field),
@@ -264,13 +305,23 @@ function MapApp() {
   const flowPhase = useFlowPhase(isMobile ? 1000 / 30 : 0);
   const windowSize = useWindowSize();
 
-  const initialViewState = useMemo(() => ({
-    longitude: COPENHAGEN.lon,
-    latitude: COPENHAGEN.lat,
-    zoom: isMobile ? 13 : 13.5, // arrows appear from zoom 13 — open already showing wind
-    pitch: isMobile ? 0 : 40,
-    bearing: 0,
-  }), [isMobile]);
+  // A view can be named in the URL hash — #z=17.5&lat=55.673&lon=12.578&pitch=0 — so a
+  // view can be shared, and so the screenshot harness (scripts/shots.mjs) can open the
+  // same place every run. Missing or malformed values fall back to the defaults.
+  const initialViewState = useMemo(() => {
+    const h = new URLSearchParams(typeof location !== "undefined" ? location.hash.replace(/^#/, "") : "");
+    const num = (k: string, lo: number, hi: number) => {
+      const v = Number(h.get(k));
+      return h.has(k) && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : undefined;
+    };
+    return {
+      longitude: num("lon", 12.3, 12.8) ?? COPENHAGEN.lon,
+      latitude: num("lat", 55.5, 55.85) ?? COPENHAGEN.lat,
+      zoom: num("z", MIN_ZOOM, MAX_ZOOM) ?? (isMobile ? 13 : 13.5), // arrows appear from zoom 13
+      pitch: num("pitch", 0, 60) ?? (isMobile ? 0 : 40),
+      bearing: num("bearing", -180, 180) ?? 0,
+    };
+  }, [isMobile]);
 
   const [viewState, setViewState] = useState(initialViewState);
 
@@ -307,14 +358,23 @@ function MapApp() {
   const [pinned, setPinned] = useState<HoverState | null>(null);
 
   // --- Route planning ---
-  const [routing, setRouting] = useState(false);
-  const [start, setStart] = useState<LatLon | null>(null);
-  const [end, setEnd] = useState<LatLon | null>(null);
+  // A shared route in the URL hash opens the panel with both ends already set.
+  const [sharedRoute] = useState(sharedRouteFromHash);
+  const [routing, setRouting] = useState(sharedRoute !== null);
+  /** The routing worker has built its graph; plans posted before that would be dropped. */
+  const [graphReady, setGraphReady] = useState(false);
+  const [start, setStart] = useState<LatLon | null>(sharedRoute?.start ?? null);
+  const [end, setEnd] = useState<LatLon | null>(sharedRoute?.end ?? null);
   // Human-readable labels for the From/To fields (address or "My location").
-  const [startLabel, setStartLabel] = useState<string | null>(null);
-  const [endLabel, setEndLabel] = useState<string | null>(null);
+  const [startLabel, setStartLabel] = useState<string | null>(sharedRoute ? "Shared start" : null);
+  const [endLabel, setEndLabel] = useState<string | null>(sharedRoute ? "Shared destination" : null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [criterion, setCriterion] = useState<RankCriterion>("recommended");
+  const [bikeType, setBikeType] = useState<BikeType>(readStoredBikeType);
+  const chooseBikeType = useCallback((t: BikeType) => {
+    setBikeType(t);
+    writeStoredBikeType(t);
+  }, []);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -336,6 +396,7 @@ function MapApp() {
       workerRef.current = new Worker(new URL("./routing/routingWorker.ts", import.meta.url), { type: "module" });
       workerRef.current.onmessage = (e: MessageEvent<OutMsg>) => {
         const msg = e.data;
+        if (msg.type === "ready") setGraphReady(true);
         if (msg.type === "routes") {
           // Ignore results from a superseded request (rider moved a pin meanwhile).
           if (msg.reqId !== reqIdRef.current) return;
@@ -354,7 +415,9 @@ function MapApp() {
 
   // Ask the worker for routes whenever the endpoints or the selected-time wind change.
   useEffect(() => {
-    if (!routing || !workerRef.current) return;
+    // graphReady is a dependency so a route named before the roads file lands (a shared
+    // link, or a quick rider) is planned as soon as the graph is built, not never.
+    if (!routing || !workerRef.current || !graphReady) return;
     if (!start || !end || !activeWind) {
       Promise.resolve().then(() => {
         setRouteOptions([]);
@@ -368,16 +431,52 @@ function MapApp() {
     const timer = setTimeout(() => {
       const reqId = ++reqIdRef.current;
       setRouteComputing(true);
-      workerRef.current!.postMessage({ type: "plan", reqId, start, end, wind: activeWind });
+      workerRef.current!.postMessage({ type: "plan", reqId, start, end, wind: activeWind, params: paramsFor(bikeType) });
     }, 150);
     return () => clearTimeout(timer);
-  }, [routing, start, end, activeWind]);
+  }, [routing, start, end, activeWind, bikeType, graphReady]);
 
   // Rank by the rider's chosen criterion; the winner is the highlighted "best".
-  const { sorted: rankedRoutes, bestId } = useMemo(
+  const { sorted: rankedRoutes, bestId, windIsSimilar } = useMemo(
     () => rankRoutes(routeOptions, criterion),
     [routeOptions, criterion],
   );
+
+  // The verdict is a statement about the day, not about the displayed sort, so it
+  // always reads the recommended order whatever "Sort by wind" is doing.
+  const recommendedOrder = useMemo(
+    () => rankRoutes(routeOptions, "recommended").sorted,
+    [routeOptions],
+  );
+
+  // Route times follow the TimeSlider. The rider's question is "did I scrub?", which
+  // is forecastIdx > 0 — not "is this a different clock hour": fetchCurrentWind drops
+  // steps older than 30 minutes, so from :30 onward forecast[0] is already the next
+  // hour and a clock comparison labelled "Now" as a forecast.
+  const routeForecastNote = useMemo(
+    () => {
+      if (forecastIdx <= 0) return null;
+      const step = forecast[Math.min(forecastIdx, forecast.length - 1)];
+      return forecastNote(step ? new Date(step.time) : null);
+    },
+    [forecast, forecastIdx],
+  );
+
+  // The verdict names the better hour AND prices the recommended route at it, so
+  // "Leave at" cannot fire on a rain improvement while the wind gets worse.
+  // routeMetrics is pure and path is plain data posted back from the routing
+  // worker, so this is cheap enough for the main thread.
+  const bestWindow = useMemo<BestWindow | null>(() => {
+    if (!rideWindow) return null;
+    const step = forecast[rideWindow.index];
+    const rec = recommendedOrder[0];
+    if (!step || !rec) return null;
+    return {
+      at: new Date(step.time).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+      // Same params the worker planned with, so the re-priced hour is comparable.
+      deltaS: routeMetrics(rec.path, step.wind, paramsFor(bikeType)).windDeltaS,
+    };
+  }, [rideWindow, forecast, recommendedOrder, bikeType]);
 
   const selectedRoute =
     rankedRoutes.find((o) => o.id === selectedRouteId)
@@ -421,6 +520,13 @@ function MapApp() {
       .then((label) => { if (label) (which === "start" ? setStartLabel : setEndLabel)(label); })
       .catch(() => { /* keep the placeholder label */ });
   }, []);
+
+  // The shared route's placeholder names fill in from reverse geocoding when it answers.
+  useEffect(() => {
+    if (!sharedRoute) return;
+    reverseFill("start", sharedRoute.start.lat, sharedRoute.start.lon);
+    reverseFill("end", sharedRoute.end.lat, sharedRoute.end.lon);
+  }, [sharedRoute, reverseFill]);
 
   const pickStart = useCallback((wp: { lat: number; lon: number; label: string }) => {
     const p = { lat: wp.lat, lon: wp.lon };
@@ -519,6 +625,8 @@ function MapApp() {
 
   const zoom = viewState.zoom ?? initialViewState.zoom;
   const density = arrowDensityForZoom(zoom);
+  // Quantised so the field rebuilds a few times per zoom level, not per frame.
+  const zoomQ = Math.round(zoom * 4) / 4;
 
   // Padded, snapped viewport box (as a stable string key). Recomputed every frame
   // but only changes value when the view moves across a snap cell.
@@ -576,7 +684,7 @@ function MapApp() {
     if (!tileManifest || !activeWind || !boundsKey || density === "hidden") return [];
     const [west, south, east, north] = boundsKey.split(",").map(Number);
     // Gather streets from the loaded tiles intersecting the view, clipped to bounds.
-    let visible: RawSegment[] = [];
+    const visible: RawSegment[] = [];
     for (const key of tileKeysForBounds(tileManifest, west, south, east, north)) {
       const segs = tileCache[key];
       if (!segs) continue;
@@ -584,14 +692,22 @@ function MapApp() {
         if (s.lon >= west && s.lon <= east && s.lat >= south && s.lat <= north) visible.push(s);
       }
     }
-    // Thin streets evenly across the view to bound the per-frame arrow count.
-    const cap = isMobile ? MAX_FLOW_STREETS_MOBILE : MAX_FLOW_STREETS_DESKTOP;
-    if (visible.length > cap) {
-      const stride = Math.ceil(visible.length / cap);
-      visible = visible.filter((_, i) => i % stride === 0);
-    }
-    return buildFlowField(visible, activeWind);
-  }, [tileManifest, activeWind, density, boundsKey, isMobile, tileCache]);
+    // deck.gl / MapLibre zoom is on 512 px tiles: m/px = 2*pi*R*cos(lat) / (512 * 2^z).
+    const mpp = (78271.517 * Math.cos(viewState.latitude * Math.PI / 180)) / Math.pow(2, zoomQ);
+    return buildFlowField(visible, activeWind, { mpp, isMobile });
+  }, [tileManifest, activeWind, density, boundsKey, tileCache, zoomQ, viewState.latitude, isMobile]);
+
+  // A read-only probe for the screenshot harness (scripts/shots.mjs), so a run can
+  // assert "arrows were drawn at this view" instead of eyeballing a PNG. Nothing in
+  // the app reads it.
+  useEffect(() => {
+    (window as unknown as { __cphwind?: unknown }).__cphwind = {
+      zoom: zoomQ,
+      arrows: flowLines.length,
+      tiles: Object.keys(tileCache).length,
+      windMs: activeWind?.speedMs ?? null,
+    };
+  }, [zoomQ, flowLines, tileCache, activeWind]);
 
   // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
   // footprints would choke the GPU. boundsKey already snaps to a coarse grid, so
@@ -686,8 +802,8 @@ function MapApp() {
   // Animated dashed flow streaks (oriented in the wind direction). Rebuilt per frame
   // (flowPhase), but that only updates a single GPU time uniform — the path/color
   // attributes are unchanged, so it's cheap. Also the pick target for the tooltip.
-  const flowLinesLayer = useMemo(() => {
-    if (flowLines.length === 0) return null;
+  const flowLineLayers = useMemo(() => {
+    if (flowLines.length === 0) return [] as Layer[];
     return createFlowLineLayer({
       data: flowLines,
       time: flowPhase,
@@ -703,9 +819,33 @@ function MapApp() {
     });
   }, [flowLines, flowPhase, isMobile, routing]);
 
+  // Bike lanes from the same OSM download the router uses: dedicated cycleways as a
+  // solid green line, roads with a track or lane as a thinner one. From zoom 15, so the
+  // city view is not a green mesh. Static; rebuilt only when the roads file lands.
+  const bikeLaneLayers = useMemo(() => {
+    if (!roads || (viewState.zoom ?? 0) < BIKE_LANES_MIN_ZOOM) return [] as Layer[];
+    const lanes = roads.features.filter((f) => {
+      const p = f.properties as { highway?: string | null; cycleway?: string | null };
+      return p.highway === "cycleway" || BIKE_LANE_TAGS.has(p.cycleway ?? "");
+    });
+    return [
+      new PathLayer<Feature>({
+        id: "bike-lanes",
+        data: lanes,
+        getPath: (f) => (f.geometry as LineString).coordinates as [number, number][],
+        getColor: (f) => ((f.properties as { highway?: string | null }).highway === "cycleway" ? BIKE_LANE_RGBA : BIKE_LANE_ON_ROAD_RGBA),
+        getWidth: (f) => ((f.properties as { highway?: string | null }).highway === "cycleway" ? 2 : 1.5),
+        widthUnits: "pixels",
+        capRounded: true,
+        jointRounded: true,
+        pickable: false,
+      }),
+    ];
+  }, [roads, viewState.zoom]);
+
   const layers = useMemo(
-    () => [...buildingLayers, ...(flowLinesLayer ? [flowLinesLayer] : []), ...routeLayers],
-    [buildingLayers, flowLinesLayer, routeLayers],
+    () => [...buildingLayers, ...bikeLaneLayers, ...flowLineLayers, ...routeLayers],
+    [buildingLayers, bikeLaneLayers, flowLineLayers, routeLayers],
   );
 
   // "Loaded" = the tile manifest is in and the first viewport tile has decoded
@@ -839,6 +979,12 @@ function MapApp() {
             onSelect={setSelectedRouteId}
             criterion={criterion}
             onCriterion={setCriterion}
+            recommendedOrder={recommendedOrder}
+            windIsSimilar={windIsSimilar}
+            bestWindow={bestWindow}
+            forecastNote={routeForecastNote}
+            bikeType={bikeType}
+            onBikeType={chooseBikeType}
             isMobile={isMobile}
           />
         </div>

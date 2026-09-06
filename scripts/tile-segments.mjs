@@ -3,7 +3,7 @@
 // into a spatial grid of small, lean tiles so the app downloads only the viewport.
 //
 // Each segment is stored as a compact tuple (derivable/unused fields dropped):
-//   [lon, lat, bearingDeg, segLen, leftDist, rightDist, leftH, rightH, geomSrc, wayId]
+//   [lon, lat, bearingDeg, segLen, leftDist, rightDist, leftH, rightH, geomSrc, wayId, startM, classRank]
 // widthM / canyonW / canyonH / laneOffsetsM are recomputed in the client.
 //
 // Output: public/data/segtiles/{col}_{row}.json  (+ index.json manifest)
@@ -19,6 +19,16 @@ const MIN_LAT = 55.54;
 const TILE_DEG = 0.02; // ~1.3 km cells
 
 const GEOM = { measured: 0, partial: 1, fallback: 2 };
+// Priority when two ways compete for one screen cell: lower wins. Arterials over
+// residential over cycleways over service roads.
+const CLASS_RANK = {
+  motorway: 0, trunk: 0, primary: 0,
+  motorway_link: 1, trunk_link: 1, primary_link: 1, secondary: 1,
+  secondary_link: 2, tertiary: 2, tertiary_link: 2,
+  unclassified: 3, residential: 3, living_street: 3,
+  cycleway: 4, path: 4,
+  pedestrian: 5, service: 5, footway: 5,
+};
 
 const r6 = (n) => Math.round(n * 1e6) / 1e6;
 const r1 = (n) => Math.round(n * 10) / 10;
@@ -50,6 +60,8 @@ async function main() {
       r0(s.rightHeightM ?? s.canyonH ?? 0),
       GEOM[s.geometrySource] ?? 2,
       s.wayId ?? null,
+      r1(s.startM ?? 0),
+      CLASS_RANK[s.highway] ?? 3,
     ];
     const key = tileKey(lon, lat);
     let arr = tiles.get(key);
@@ -74,7 +86,7 @@ async function main() {
     tileDeg: TILE_DEG,
     minLon: MIN_LON,
     minLat: MIN_LAT,
-    fields: ["lon", "lat", "bearingDeg", "segLen", "leftDist", "rightDist", "leftH", "rightH", "geomSrc", "wayId"],
+    fields: ["lon", "lat", "bearingDeg", "segLen", "leftDist", "rightDist", "leftH", "rightH", "geomSrc", "wayId", "startM", "classRank"],
     geom: ["measured", "partial", "fallback"],
     tiles: index.map(([k]) => k),
   };

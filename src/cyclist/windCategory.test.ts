@@ -206,9 +206,12 @@ describe("band occupancy on the shipped network", () => {
     // Geometry fixes the ratio, so a 2 m/s day and an 11 m/s day colour identically.
     // An absolute scale could not do this — it was the reason the old one showed
     // two colours at the live wind.
+    // 3 decimals of a percentage: a segment sitting on a band edge can cross it on
+    // floating-point noise at a different ambient, and one segment in 2.8 million
+    // evaluations is 3.5e-5 %.
     const calm = occupancy(2), wild = occupancy(11);
     for (const b of WIND_BANDS) {
-      expect(calm.get(b.key)!, b.label).toBeCloseTo(wild.get(b.key)!, 6);
+      expect(calm.get(b.key)!, b.label).toBeCloseTo(wild.get(b.key)!, 3);
     }
   });
 });
