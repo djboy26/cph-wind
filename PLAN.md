@@ -1572,6 +1572,86 @@ Changed beyond the patch: nothing. The PNGs stayed on this machine in `docs/rend
 
 ---
 
+## Step 5g — The lattice drawn whole
+
+DJ, 2026-09-06, on the 5f renders: *"still disappointing. I need neatly ordered arrows, fixed
+coordinates, and closely packed arrows."* Top priority. Looked at on the real basemap
+(`docs/renders/step7/`, z 17.5 and 18.5 on H.C. Andersens Boulevard), 5f has three faults, all
+in `buildFlowField`, none in the data:
+
+1. **It thinned a road's own lattice.** The one-candidate-per-screen-cell pass was meant to
+   settle contention *between* roads, but a road-aligned lattice at pitch ≈ cell size lands two
+   of its own points in one axis-aligned cell wherever the road runs diagonally, and one was
+   dropped each time. That is the irregular gap pattern in every 5f picture: rows with holes,
+   columns that skip.
+2. **Rows across only ever appeared at maximum zoom.** Rows were kept at `j % k == 0`, i.e. at
+   multiples of the *along* pitch from the centreline, so a 16 m arterial (half-width 6.5 m)
+   fitted a second row only when the pitch was ≤ 6 m, which is zoom 18.5. At 17.5 and below
+   every road was one row, whatever its width.
+3. **Dual carriageways were inflated.** `roadWidthM` took half the canyon width when that beat
+   the class width, so each carriageway of a boulevard (its own OSM way, ~12 m of tarmac) was
+   treated as 22 m wide and its outer rows sat on the median and the footway.
+
+`step5g.patch` is the fix; `FlowLineLayer.ts` and its tests only. Nothing else in the app
+changes: the two colour/opacity channels, the brightness wave, the tooltip, the data.
+
+**What it does.**
+
+- **Pitch** 26 px on desktop, 28 on phones (5f: 34); **glyph** 19 px, 21 on phones (5f: 22).
+  Closely packed: the arrow is 0.73 of the pitch. The pitch in metres is a whole number,
+  `pitchM = ceil(PITCH_PX × mpp)`: 5 m at zoom 18.5, 7 at 18, 9 at 17.5, 18 at 16.5, 141 at 13.5.
+- **Columns** along every road at multiples of the pitch from the road's first node (`startM`),
+  **rows** across it at the same pitch, as many as fit inside the carriageway, centred
+  (`rowOffsetsM`): an arterial (16 m class width, 1.5 m margin each side) carries 3 rows at
+  18.5 (−5, 0, +5 m), 2 at 17.5 (±5 m), 1 at 16.5; a secondary (13 m) the same; a tertiary
+  (10 m) 2 rows from zoom 17.8; a residential street (7 m) 2 rows from 18.3, else 1; a cycleway
+  1 row always. A boulevard mapped as two carriageways plus two cycle tracks therefore shows
+  3 + 3 + 1 + 1 = 8 lines of arrows at 18.5 and 2 + 2 + 1 + 1 = 6 at 17.5.
+- **Road width** is the class width, never more than the canyon (16 / 13 / 10 / 7 / 3.5 / 5 m by
+  rank). The half-canyon inflation is gone.
+- **A road's own lattice is never thinned.** Every column × every row is drawn. The only
+  same-road drop is a true duplicate (a piece boundary counted by both pieces, the inside of a
+  sharp bend): centres closer than 0.5 × pitch.
+- **Contention only between roads.** Roads are taken in rank order (arterial > secondary >
+  tertiary > residential > cycleway > service, then lower way id), each road centre row first;
+  a point is kept unless a kept point of *another* road is within 0.7 × pitch. So at a junction
+  the arterial's grid is complete and the side street's grid has a hole around it; a cycle track
+  running 2–3 m from a carriageway's outer row yields to it, one further away keeps its own row.
+  Deterministic: the same view always draws the same arrows.
+- **Fixed coordinates.** At a given zoom every arrow sits on a whole-metre mark of its road's
+  own frame, fixed to the road; nothing about the lattice depends on the viewport, the time or
+  the wind, so panning never moves an arrow and the animation never does either. Zooming
+  changes the pitch (whole metres), so which marks carry arrows changes with zoom, as it must for
+  the on-screen spacing to stay 26 px.
+
+**Rendered on the review side** (the app's own layers; no basemap there), against the 5f
+renders on the real basemap: at 18.5 each boulevard carriageway is three complete rows in
+straight columns; at 17.5 Vesterbrogade is four parallel lines (two carriageways, two cycle
+tracks) in step; at 16.5 one regular row per street. Arrow counts, 4.4 m/s from 240°: opening
+view 4561 desktop / 1031 phone; 16.5 → 1901; 17.5 → 2591; 18.5 → 4101; 17.5 pitch 40 → 3826;
+17.5 phone → 1709 (5f: 2110 / 494 / 1195 / 1788 / 2569 / 2636 / 1173).
+
+**Tests** (`FlowLineLayer.test.ts`, rewritten, 21): `pitchM` whole metres and ≥ 26 px at six
+zooms, phones +2 px; `roadWidthM` class width capped by the canyon; `rowOffsetsM` exact rows
+for an arterial at three zooms and a residential street, symmetric, ≥ pitch − 1 apart, inside
+the half-width + 0.5; a lone arterial at 18.5 is the complete 13 × 3 grid (39 arrows, nothing
+thinned); two rows at 17.5 on an arterial and one on a residential street; a cycleway one row at
+every zoom; columns on multiples of the pitch from the way start (a piece from 40 m carries 45,
+54, …, 99 at 9 m); every arrow on a whole-metre mark at three zooms; two consecutive pieces
+share their boundary column once (25 columns over 120 m); a 6 m stub keeps an arrow; a cycleway
+4 m from its road yields entirely and the road keeps all of its own; a crossing street keeps its
+lattice except within 0.7 pitch of the arterial's arrows; input order irrelevant; no two arrows
+of different roads within 0.7 pitch on a crossing grid at four zooms; glyph 19 / 21 px; opacity
+by speed; wave phase 1/6 per pitch downwind; direction is the wind vector.
+
+### Acceptance
+
+`npm run shots -- step5g` PASS with the basemap loaded; then DJ, on production after the ship:
+maximum zoom on H.C. Andersens Boulevard shows straight rows and columns with no holes on the
+carriageway; `=`×4 shows two rows per carriageway; every street has arrows at one spacing.
+
+---
+
 ## The canyon model, reviewed 2026-09-04
 
 Prompted by DJ's question above. `canyonModifiedWind()` in `src/math/index.ts`, unchanged since
@@ -1731,7 +1811,8 @@ long auto mode that progresses the project immensely."* So this run merges steps
 production on its own authority, gated by the harness, and leaves the physics change (steps 8,
 2b, 9) on a branch with an open PR. Every step below arrives as a patch at the repo root, built
 and verified on the review side; the whole chain was applied in order on a clean
-`feat/bike-type` checkout and ends at 154 tests, lint clean, build clean, harness PASS.
+`feat/bike-type` checkout and ends at 154 tests, lint clean, build clean, harness PASS (158 with Step 5g, added 2026-09-06
+between items 2 and 3).
 
 Items in order; every item ends with its checks green and a commit, or with a **Run** block
 under its heading saying where it stopped and why, and nothing else touched.
@@ -1852,21 +1933,49 @@ git push
 `docs/renders/step7/report.md`; the PNGs are ignored. Add the Completed block under Step 7 with
 the arrow counts from `report.md`; commit as `Record Step 7`; push.
 
+### 2b — Step 5g, the lattice drawn whole (added 2026-09-06, before the ship)
+
+```
+git checkout fix/map-legibility
+git apply --3way step5g.patch
+rm step5g.patch
+npm run check
+npm run build
+npm run shots -- step5g
+git add -A
+git commit -m "Step 5g: the lattice drawn whole"
+git push
+```
+
+Expect **145 tests** and, in `docs/renders/step5g/report.md`, `PASS` with the basemap loaded
+and arrow counts within a few percent of Step 5g's numbers above (2591 at 17.5, 4101 at 18.5).
+Completed block under Step 5g, `Record Step 5g`, push. This goes into the ship below, so the
+production update carries it.
+
 ### 3 — Ship: `fix/map-legibility` → `main`
 
 Steps 1–7 go to production together. The gate is item 2's PASS on this machine plus the same
 checks on the merged tree:
 
 ```
-git checkout main
-git pull --ff-only origin main
+git fetch origin
+git checkout -B main origin/main
 git merge --no-ff fix/map-legibility -m "Merge fix/map-legibility: steps 1-7 (ranker, canyon boundary layer, scale, panel, lattice, bike types, harness)"
 npm run check
 npm run build
 npm run shots -- ship
 ```
 
-`main` carries only the bot's `chore: wind-validation sample` commits since `630df8e`; they touch
+*(Amended after the second run, recorded below.)* `git checkout -B main origin/main` points local
+`main` at the remote, dropping the one unpushed PLAN.md-only commit it carried (`8f54f73`,
+2026-09-03), whose edit the branch already holds — DJ's decision, 2026-09-06. It works from any
+branch, including `main` itself. Rehearsed on the review side on `a7a0dfd` + `ed07701`: the merge
+is clean, 141 tests, build clean. Production is **https://cph-wind.vercel.app** (Vercel project
+`cph-wind`; the `main` branch alias is `cph-wind-git-main-djboy26s-projects.vercel.app`); quote
+it in the report after the push.
+
+Expect **145 tests** on the merged tree (Step 5g included). `main` carries only the bot's
+`chore: wind-validation sample` commits since `630df8e`; they touch
 `validation-log.ndjson`, which no step touches, so the merge is conflict-free. If it is not,
 `git merge --abort` and stop. On green and `PASS`:
 
@@ -1913,6 +2022,11 @@ To resume: point local `main` at `origin/main` — from the branch, `git branch 
 origin/main`; nothing of `8f54f73` is lost, the branch carries it — then rerun item 3 from its
 first line. `--ff-only` is then a no-op and the merge is the clean one.
 
+**Resumed 2026-09-06 (reviewer).** Diagnosis confirmed from the remote side and the merge
+rehearsed clean. Item 3 now starts with `git checkout -B main origin/main` (amended in place
+above), which is the same repair as `git branch -f` but also works while `main` is checked out.
+Rerun from item 2b (Step 5g, the arrow lattice fix DJ asked for first), then item 3 onward.
+
 ### 4 — Step 8, the canyon vortex
 
 ```
@@ -1927,7 +2041,7 @@ git commit -m "Step 8: vortex reversal in deep canyons"
 git push -u origin feat/canyon-vortex
 ```
 
-Expect **146 tests**. Completed block under Step 8, `Record Step 8`, push.
+Expect **150 tests** (145 after the ship, plus 5). Completed block under Step 8, `Record Step 8`, push.
 
 ### 5 — Step 2b, routing on the canyon wind
 
@@ -1944,7 +2058,7 @@ git push
 ```
 
 `npm run data:canyon` writes `public/data/canyon-by-way.json` from the committed tiles (expect
-`36946 ways, 159201 pieces, 2.55 MB`); it is committed by the `git add -A`. Expect **151 tests**
+`36946 ways, 159201 pieces, 2.55 MB`); it is committed by the `git add -A`. Expect **155 tests**
 and, in `docs/renders/step2b/report.md`, `canyonEdges 363142` on the panel-routes row (any
 value above 300,000 passes; below that, stop). Completed block, `Record Step 2b`, push.
 
@@ -1961,7 +2075,7 @@ git commit -m "Step 9: hint and tooltip copy"
 git push
 ```
 
-Expect **154 tests**. Completed block, `Record Step 9`, push. Then, if `gh` works:
+Expect **158 tests**. Completed block, `Record Step 9`, push. Then, if `gh` works:
 `gh pr create --base main --head feat/canyon-vortex --title "Steps 8, 2b, 9: canyon vortex, canyon routing, copy" --body "Physics change; needs eyes before merge. See PLAN.md."`
 **Do not merge this PR.** Without `gh`, leave the branch pushed. The last line of the final
 report is the PR URL or the branch name, and the report says which shots need a person's eyes:
