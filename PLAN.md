@@ -1892,6 +1892,24 @@ throwaway commit on top of `main`: the merge is then clean.
 `main` by the next commit there, docs only, so the two copies match again; then item 2 rerun
 from its first line as written.
 
+### Shipped 2026-09-06 — merges `6c1c9bc`, `045a384`
+
+Item 0: `bc13db9` committed this PLAN.md on `feat/canyon-vortex`; `96a0f9e` carried it onto `main`
+(`git checkout -B main origin/main` at `614651b`, then the branch's PLAN.md); both pushed.
+Item 1: Step 5h `794e66e` on `fix/road-band`, record `3891df0`; `git pull --ff-only` took `main`
+over one bot commit (`9aafa5e`); merged as `6c1c9bc` ("Merge fix/road-band: Step 5h") — **145
+tests**, build clean — and pushed: production took the road band. Item 2 stopped once at its
+merge (the Run block above, `55891fa`) and resumed on DJ's decision: `2535c05` noted it on the
+branch, `ce725b5` carried the branch's PLAN.md onto `main`, the copies matched again, and the
+rerun's `git merge main` was clean: `ce2497a`. On the branch **158 tests**, build clean;
+`npm run shots -- physics` ended `PASS` and `docs/renders/physics/report.md` says
+`Basemap: loaded from CARTO.` No browser errors. — 17.5 → 3177, 18.5 → 6708 (Step 5h's numbers), the
+shared route planned 4 routes, canyonEdges 363142; pushed. Then `feat/canyon-vortex` merged into `main` as `045a384`
+("steps 8, 2b, 9"); **158 tests**, build clean; pushed: production is
+**https://cph-wind.vercel.app** with the road band, the canyon vortex, canyon routing and the
+copy. `feat/canyon-vortex` and `fix/road-band` deleted on origin. The physics report rides in
+this commit, as the harness convention has it; `gh` is not installed, so no PR.
+
 ---
 
 ## The canyon model, reviewed 2026-09-04
