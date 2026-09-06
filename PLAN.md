@@ -1859,6 +1859,39 @@ queue`; push. Final report: the commit hashes per item, the Basemap and Result l
 `step5h` and `physics`, the production URL, and the two shots that need eyes (the boulevard at
 maximum zoom and at `=`×4, both on production).
 
+### Run 2026-09-06 — stopped at `git merge main` (item 2): conflict in PLAN.md
+
+Item 0 ran as written: `bc13db9` on `feat/canyon-vortex`, `96a0f9e` on `main`, both pushed.
+Item 1 ran in full: `794e66e` Step 5h and `3891df0` Record Step 5h on `fix/road-band`;
+`git pull --ff-only origin main` fast-forwarded local `main` to `9aafa5e` (one bot commit had
+arrived); the merge `6c1c9bc` ("Merge fix/road-band: Step 5h") passed 145 tests and the build
+and was pushed — production carries the road band.
+
+Item 2: `git pull --ff-only origin feat/canyon-vortex` was already up to date; `git merge main`
+stopped with a conflict in PLAN.md only (1 conflict hunks). `scripts/shots.mjs`,
+`src/App.tsx`, `FlowLineLayer.ts` and its test, `docs/renders/step5h/report.md` and
+`validation-log.ndjson` auto-merged. Why, although item 0 made the two copies identical: the
+merge base of `main` and `feat/canyon-vortex` is `614651b` (where the branch was cut), whose
+PLAN.md predates the step 8, 2b and 9 records, Step 5h and this queue. Both sides insert all
+of that at the same places relative to that base, and `main` also has the Step 5h Completed
+block inside the insertion (`3891df0`), so git sees two different insertions at one point and
+refuses; identical copies merge trivially, copies that differ by one block do not.
+`git diff bc13db9 main -- PLAN.md`: 1 file changed, 30 insertions(+).
+
+`git merge --abort` restored the branch to `bc13db9`; nothing else was touched, no physics
+render ran, both branches still exist on origin. This commit, on `feat/canyon-vortex`, carries
+`main`'s PLAN.md (the branch's copy plus the Step 5h record) with this block added, so the
+branch's copy is now the superset.
+
+To resume, make the two copies identical again the way item 0 did, in the other direction —
+on `main`: `git checkout feat/canyon-vortex -- PLAN.md`, commit ("Plan: carry the branch's
+PLAN.md onto main"), push — and rerun item 2 from its first line; rehearsed here with a
+throwaway commit on top of `main`: the merge is then clean.
+
+**Resumed 2026-09-06 — DJ's decision, option 1:** this PLAN.md (the superset) carried onto
+`main` by the next commit there, docs only, so the two copies match again; then item 2 rerun
+from its first line as written.
+
 ---
 
 ## The canyon model, reviewed 2026-09-04
