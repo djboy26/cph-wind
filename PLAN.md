@@ -2057,6 +2057,20 @@ rehearsed clean. Item 3 now starts with `git checkout -B main origin/main` (amen
 above), which is the same repair as `git branch -f` but also works while `main` is checked out.
 Rerun from item 2b (Step 5g, the arrow lattice fix DJ asked for first), then item 3 onward.
 
+### Shipped 2026-09-06 — merge `3598510`
+
+`git fetch origin`; `git checkout -B main origin/main` put local `main` on `81c1e36` — the bot's
+`chore: wind-validation sample` commits past `d46c000` and nothing else; `8f54f73` dropped, as
+decided. `git merge --no-ff fix/map-legibility` at `6805283` was clean: merge `3598510`. On the
+merged tree `npm run check` green, **145 tests**, the count the queue expects; `npm run
+build` clean; `npm run shots -- ship` `PASS`, and `docs/renders/ship/report.md` says
+`Basemap: loaded from CARTO.` No browser errors. Counts: opening view 4561 desktop / 1031 phone;
+16.5 → 1901; 17.5 → 2591; 18.5 → 4101; 17.5 at pitch 40 → 3826; 17.5 phone → 1709;
+the shared route planned 3 routes. The report was committed as `5a6c9fe` ("Record ship renders")
+and `git push origin main` sent `5a6c9fe` up: production is **https://cph-wind.vercel.app**.
+`feat/route-panel-redesign` and `feat/bike-type` deleted on origin. `gh` is not installed on this
+machine, so no PR: the local-merge path, as the item allows.
+
 ### 4 — Step 8, the canyon vortex
 
 ```
