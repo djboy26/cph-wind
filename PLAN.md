@@ -1650,6 +1650,36 @@ by speed; wave phase 1/6 per pitch downwind; direction is the wind vector.
 maximum zoom on H.C. Andersens Boulevard shows straight rows and columns with no holes on the
 carriageway; `=`×4 shows two rows per carriageway; every street has arrows at one spacing.
 
+### Completed 2026-09-06 — commit `136b36a`
+
+Applied with `git apply --3way step5g.patch` on `ec8de06`: the queue text for this item (this
+section, item 2b, the amended item 3) was committed just before as `ec8de06`, PLAN.md only, so the
+step commit carries the patch alone — `FlowLineLayer.ts` and its tests, clean. The patch file was
+deleted before the commit and never committed. `npm run check` green, **145 tests**, the
+count the queue expects. `npm run build` clean. `npm run shots -- step5g` ended `PASS`;
+`docs/renders/step5g/report.md` says `Basemap: loaded from CARTO.` No browser errors. Pushed.
+
+**Arrow counts from `report.md`**, this machine, against the review-side numbers:
+
+| view | arrows | review side |
+|---|---|---|
+| opening view, desktop | 4561 | 4561 |
+| opening view, phone | 1031 | 1031 |
+| 16.5, H.C. Andersens Boulevard | 1901 | 1901 |
+| 17.5 | 2591 | 2591 |
+| 18.5 | 4101 | 4101 |
+| 17.5 at pitch 40 | 3826 | 3826 |
+| 17.5, phone | 1709 | 1709 |
+
+17.5 is 0.0% off 2591 and 18.5 is 0.0% off 4101, inside the few percent the queue
+allows. The shared route planned 3 routes.
+
+Changed beyond the patch: nothing.
+
+For a person, on production after the ship: the boulevard lattice at maximum zoom (straight rows
+and columns, no holes on the carriageway) and at `=`×4 (two rows per carriageway); every street
+at one spacing.
+
 ---
 
 ## The canyon model, reviewed 2026-09-04
