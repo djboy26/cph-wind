@@ -1473,6 +1473,20 @@ The harness (Step 7) proves the arrows are drawn; the look is DJ's call from the
 build after item 3: opening view / `=`×3 / `=`×4 / maximum zoom on Amager Boulevard, against
 panel 2 of the scratch. Then the pitch: 34 as built, or 28, or 40 — one number.
 
+### Completed 2026-09-06 — commit `fbd8724`
+
+Applied with `git apply --3way step5f.patch` on `f1783f8` — the branch after item 0 committed the
+queue docs as `8c5f51a` and cherry-picked Step 6 (`25aaac1`) in as `f1783f8` — clean on every file.
+The patch file was deleted before the commit and never committed. `npm run check` green,
+**141 tests**, the count the queue expects. `npm run build` clean. Pushed.
+
+Changed beyond the patch: nothing. `public/arrowhead.svg` went with it, as the step says; the
+5e shaft-and-head pair is gone.
+
+For a person, from production after item 3: the lattice pitch on the real basemap — opening
+view / `=`×3 / `=`×4 / maximum zoom on Amager Boulevard, against panel 2 of the scratch — and
+then the one number: 34 as built, or 28, or 40.
+
 ---
 
 
