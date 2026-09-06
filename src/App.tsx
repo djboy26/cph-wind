@@ -138,6 +138,20 @@ function constrainView<T extends { longitude?: number; latitude?: number; zoom?:
   };
 }
 
+// A route can be named in the URL hash — #s=55.6835,12.5713&e=55.6656,12.5786 — so a
+// plan can be shared, and so the screenshot harness gets the same route every run
+// without a geocoder. Read once at mount; both ends must parse or neither counts.
+function sharedRouteFromHash(): { start: LatLon; end: LatLon } | null {
+  if (typeof location === "undefined") return null;
+  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const parse = (k: string): LatLon | null => {
+    const [lat, lon] = (h.get(k) ?? "").split(",").map(Number);
+    return Number.isFinite(lat) && Number.isFinite(lon) && lat > 55 && lat < 56 && lon > 12 && lon < 13 ? { lat, lon } : null;
+  };
+  const start = parse("s"), end = parse("e");
+  return start && end ? { start, end } : null;
+}
+
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(
     typeof window !== "undefined" && window.innerWidth < MOBILE_BREAKPOINT,
@@ -291,13 +305,23 @@ function MapApp() {
   const flowPhase = useFlowPhase(isMobile ? 1000 / 30 : 0);
   const windowSize = useWindowSize();
 
-  const initialViewState = useMemo(() => ({
-    longitude: COPENHAGEN.lon,
-    latitude: COPENHAGEN.lat,
-    zoom: isMobile ? 13 : 13.5, // arrows appear from zoom 13 — open already showing wind
-    pitch: isMobile ? 0 : 40,
-    bearing: 0,
-  }), [isMobile]);
+  // A view can be named in the URL hash — #z=17.5&lat=55.673&lon=12.578&pitch=0 — so a
+  // view can be shared, and so the screenshot harness (scripts/shots.mjs) can open the
+  // same place every run. Missing or malformed values fall back to the defaults.
+  const initialViewState = useMemo(() => {
+    const h = new URLSearchParams(typeof location !== "undefined" ? location.hash.replace(/^#/, "") : "");
+    const num = (k: string, lo: number, hi: number) => {
+      const v = Number(h.get(k));
+      return h.has(k) && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : undefined;
+    };
+    return {
+      longitude: num("lon", 12.3, 12.8) ?? COPENHAGEN.lon,
+      latitude: num("lat", 55.5, 55.85) ?? COPENHAGEN.lat,
+      zoom: num("z", MIN_ZOOM, MAX_ZOOM) ?? (isMobile ? 13 : 13.5), // arrows appear from zoom 13
+      pitch: num("pitch", 0, 60) ?? (isMobile ? 0 : 40),
+      bearing: num("bearing", -180, 180) ?? 0,
+    };
+  }, [isMobile]);
 
   const [viewState, setViewState] = useState(initialViewState);
 
@@ -334,12 +358,16 @@ function MapApp() {
   const [pinned, setPinned] = useState<HoverState | null>(null);
 
   // --- Route planning ---
-  const [routing, setRouting] = useState(false);
-  const [start, setStart] = useState<LatLon | null>(null);
-  const [end, setEnd] = useState<LatLon | null>(null);
+  // A shared route in the URL hash opens the panel with both ends already set.
+  const [sharedRoute] = useState(sharedRouteFromHash);
+  const [routing, setRouting] = useState(sharedRoute !== null);
+  /** The routing worker has built its graph; plans posted before that would be dropped. */
+  const [graphReady, setGraphReady] = useState(false);
+  const [start, setStart] = useState<LatLon | null>(sharedRoute?.start ?? null);
+  const [end, setEnd] = useState<LatLon | null>(sharedRoute?.end ?? null);
   // Human-readable labels for the From/To fields (address or "My location").
-  const [startLabel, setStartLabel] = useState<string | null>(null);
-  const [endLabel, setEndLabel] = useState<string | null>(null);
+  const [startLabel, setStartLabel] = useState<string | null>(sharedRoute ? "Shared start" : null);
+  const [endLabel, setEndLabel] = useState<string | null>(sharedRoute ? "Shared destination" : null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [criterion, setCriterion] = useState<RankCriterion>("recommended");
   const [bikeType, setBikeType] = useState<BikeType>(readStoredBikeType);
@@ -368,6 +396,7 @@ function MapApp() {
       workerRef.current = new Worker(new URL("./routing/routingWorker.ts", import.meta.url), { type: "module" });
       workerRef.current.onmessage = (e: MessageEvent<OutMsg>) => {
         const msg = e.data;
+        if (msg.type === "ready") setGraphReady(true);
         if (msg.type === "routes") {
           // Ignore results from a superseded request (rider moved a pin meanwhile).
           if (msg.reqId !== reqIdRef.current) return;
@@ -386,7 +415,9 @@ function MapApp() {
 
   // Ask the worker for routes whenever the endpoints or the selected-time wind change.
   useEffect(() => {
-    if (!routing || !workerRef.current) return;
+    // graphReady is a dependency so a route named before the roads file lands (a shared
+    // link, or a quick rider) is planned as soon as the graph is built, not never.
+    if (!routing || !workerRef.current || !graphReady) return;
     if (!start || !end || !activeWind) {
       Promise.resolve().then(() => {
         setRouteOptions([]);
@@ -403,7 +434,7 @@ function MapApp() {
       workerRef.current!.postMessage({ type: "plan", reqId, start, end, wind: activeWind, params: paramsFor(bikeType) });
     }, 150);
     return () => clearTimeout(timer);
-  }, [routing, start, end, activeWind, bikeType]);
+  }, [routing, start, end, activeWind, bikeType, graphReady]);
 
   // Rank by the rider's chosen criterion; the winner is the highlighted "best".
   const { sorted: rankedRoutes, bestId, windIsSimilar } = useMemo(
@@ -489,6 +520,13 @@ function MapApp() {
       .then((label) => { if (label) (which === "start" ? setStartLabel : setEndLabel)(label); })
       .catch(() => { /* keep the placeholder label */ });
   }, []);
+
+  // The shared route's placeholder names fill in from reverse geocoding when it answers.
+  useEffect(() => {
+    if (!sharedRoute) return;
+    reverseFill("start", sharedRoute.start.lat, sharedRoute.start.lon);
+    reverseFill("end", sharedRoute.end.lat, sharedRoute.end.lon);
+  }, [sharedRoute, reverseFill]);
 
   const pickStart = useCallback((wp: { lat: number; lon: number; label: string }) => {
     const p = { lat: wp.lat, lon: wp.lon };
@@ -658,6 +696,18 @@ function MapApp() {
     const mpp = (78271.517 * Math.cos(viewState.latitude * Math.PI / 180)) / Math.pow(2, zoomQ);
     return buildFlowField(visible, activeWind, { mpp, isMobile });
   }, [tileManifest, activeWind, density, boundsKey, tileCache, zoomQ, viewState.latitude, isMobile]);
+
+  // A read-only probe for the screenshot harness (scripts/shots.mjs), so a run can
+  // assert "arrows were drawn at this view" instead of eyeballing a PNG. Nothing in
+  // the app reads it.
+  useEffect(() => {
+    (window as unknown as { __cphwind?: unknown }).__cphwind = {
+      zoom: zoomQ,
+      arrows: flowLines.length,
+      tiles: Object.keys(tileCache).length,
+      windMs: activeWind?.speedMs ?? null,
+    };
+  }, [zoomQ, flowLines, tileCache, activeWind]);
 
   // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
   // footprints would choke the GPU. boundsKey already snaps to a coarse grid, so
