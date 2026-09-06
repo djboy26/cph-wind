@@ -1,6 +1,6 @@
 # cph-wind — Ranker fix and panel rebuild
 
-Written 2026-09-03, reviewed 2026-09-04, queued for auto mode 2026-09-06 (see "The queue" near the end). Scoped deliberately. Do the steps in order. Step 4 depends on step 1's tie flag and on step 2a's corrected wind.
+Written 2026-09-03, reviewed 2026-09-04, queued for auto mode 2026-09-06 (see "The queue" near the end; the second queue of that evening sits after Step 5h). Scoped deliberately. Do the steps in order. Step 4 depends on step 1's tie flag and on step 2a's corrected wind.
 Step 3 exists because step 2a invalidated the scale it recalibrates.
 
 ---
@@ -1679,6 +1679,155 @@ Changed beyond the patch: nothing.
 For a person, on production after the ship: the boulevard lattice at maximum zoom (straight rows
 and columns, no holes on the carriageway) and at `=`×4 (two rows per carriageway); every street
 at one spacing.
+
+---
+
+## Step 5h — The road band, size B, and the opacity floor
+
+DJ, 2026-09-06 evening, on 5g in production (phone, maximum zoom on H.C. Andersens
+Boulevard): *"the arrow size at the highest zoom is still too big, also they are outside the
+road geometry — why?"* Answered with pictures and two choices; he chose the road band and
+size B.
+
+**Why the arrows sat outside the road.** The basemap (CARTO Positron) draws every road at a
+symbolic pixel width by class, not at its real width. At maximum zoom that white line is about
+4 m wide for a carriageway that is 10–12 m of tarmac, so a lattice that is right in metres
+(rows at ±5 m) spills past the drawn line onto what the basemap paints as land. The 5g rows
+were on the real road; the picture said otherwise. Nothing in the data or the lattice was
+wrong; the reference it was judged against was.
+
+`step5h.patch`: `App.tsx`, `FlowLineLayer.ts` (+ test), `scripts/shots.mjs`. Applies cleanly
+on `main` (614651b) and on `feat/canyon-vortex` (7abc9de); rehearsed both, and the merge of
+one into the other. 145 tests on main, 158 on the branch. Harness PASS on the review side.
+
+**What it does.**
+
+1. **The app draws the road surface itself** from zoom 16 inward (`ROAD_BAND_MIN_ZOOM`): one
+   `PathLayer` path per 30 m piece, `widthUnits: "meters"`, width = `roadWidthM` — exactly the
+   width the lattice fills — white (255, 255, 255, 240) over a 1.2 m casing (222, 214, 199),
+   rounded caps and joins so the pieces read as one road. Drawn above the buildings and below
+   the bike lanes and arrows. So the arrows are inside the road by construction, at every
+   zoom where the band is drawn; below 16 the basemap's own lines are about the right width
+   and carry the single row. The band covers the basemap's thin line; where a boulevard is
+   two OSM ways 20 m apart, the two 16 m bands meet and the median disappears under them —
+   accepted, since the arrows are the point. The street pieces the field already loads feed
+   it (`visibleSegments`, now shared by the field and the band), so no new data.
+2. **Size B**: pitch 24 px, glyph 18 px (phones 26 / 20). Pitch in whole metres per zoom,
+   desktop: 3 m at 18.5, 5 at 18, 6 at 17.5, 9 at 17, 12 at 16.5, 17 at 16, 92 at 13.5.
+   Rows on an arterial (half-width 6.5 m less the margin): 5 at 18.5 (−6, −3, 0, 3, 6), 3 at
+   18 and 17.5, 2 at 17 and 16.5, 1 at 16. A residential street: 2 rows at 18.5, else 1.
+   (The 5g record above gave zoom labels half a level too high: 0.17 m/px is zoom 18, not
+   18.5. The pitches it lists are right for the zooms one half-level lower. The tests now
+   say the right zooms.)
+3. **Opacity floor 0.75** (was 0.55): `alphaForSpeed = 0.75 + 0.25·min(v/5, 1)`. The palest
+   shelter colour clears 3:1 on white only at full opacity; at 0.55 on the new white band a
+   calm day's arrows read at 1.8:1 and all but vanished. A calm day is still visibly lighter
+   than a gale.
+4. **Harness**: screenshots through CDP `Page.captureScreenshot` instead of
+   `page.screenshot()`, which waits on animation frames and times out on a software renderer
+   where deck.gl runs at a frame a second. Same pixels; on a real GPU no difference.
+
+**Numbers from the review side** (4.4 m/s from 240°): opening view 5177 desktop / 1169 phone;
+16.5 → 2103; 17.5 → 3177; 18.5 → 6708; 17.5 at pitch 40 → 4705; 17.5 phone → 1709.
+
+**Tests** — the 5g suite with the new constants (pitch 5 / 9 / 17 / 130 m at 0.17 / 0.34 /
+0.68 / 5.4 m/px; phone 9 and 18), the 3 m row case for an arterial at 18.5, glyph 18 / 20,
+opacity 0.75 floor. 21 tests in the file; 145 on main.
+
+### Acceptance
+
+`npm run shots -- step5h` PASS with the basemap loaded. Then DJ on production: maximum zoom
+on the boulevard — every arrow inside a white road, rows straight and complete, arrows a
+notch smaller than before; `=`×4 — two to three rows per carriageway.
+
+---
+
+## The second queue — 2026-09-06 evening, auto mode
+
+Same rules as the first queue (top of "The queue" above): never `npm test`, never a dev
+server, never commit a `.patch`, never `--force`, `git status` before every commit, stop and
+record on any failure, push after every item. Items in order.
+
+### 0 — Preflight
+
+If a folder named `cph-wind` exists inside this repo, stop. `git branch --show-current` must
+print `feat/canyon-vortex` (where the first queue ended; this PLAN.md was written on top of
+that branch's copy); if it prints anything else, stop and record. `git status --porcelain` may
+show only ` M PLAN.md`, `?? .claude/` and `??` lines for `*.patch`; anything else, stop.
+
+```
+git add PLAN.md
+git commit -m "Plan: Step 5h and the second queue"
+git push
+git fetch origin
+git checkout -B main origin/main
+git checkout feat/canyon-vortex -- PLAN.md
+git commit -m "Plan: carry the branch's PLAN.md (step 8, 2b, 9 records; Step 5h; second queue) onto main"
+git push
+```
+
+After this both branches hold the same PLAN.md, so item 2's merges cannot conflict in it.
+
+### 1 — Step 5h on a branch, then into production
+
+```
+git checkout -b fix/road-band main
+git apply --3way step5h.patch
+rm step5h.patch
+npm run check
+npm run build
+npm run shots -- step5h
+git add -A
+git commit -m "Step 5h: the road band, size B, opacity floor"
+git push -u origin fix/road-band
+```
+
+Expect **145 tests**; `docs/renders/step5h/report.md` PASS with the basemap loaded, arrow
+counts within a few percent of Step 5h's numbers (3177 at 17.5, 6708 at 18.5). Completed
+block under Step 5h, `Record Step 5h`, push. Then:
+
+```
+git checkout main
+git pull --ff-only origin main
+git merge --no-ff fix/road-band -m "Merge fix/road-band: Step 5h"
+npm run check
+npm run build
+git push origin main
+```
+
+Production (https://cph-wind.vercel.app) now carries the road band. If `git pull --ff-only`
+refuses, stop and record (local `main` was set to the remote at item 0, so only a push from
+elsewhere can cause it).
+
+### 2 — Bring the physics branch up to date and ship it
+
+```
+git checkout feat/canyon-vortex
+git pull --ff-only origin feat/canyon-vortex
+git merge main -m "Merge main (Step 5h) into feat/canyon-vortex"
+npm run check
+npm run build
+npm run shots -- physics
+git push
+```
+
+Rehearsed on the review side: the merge is clean (the branch's `App.tsx` changes are in the
+roads-loading and worker code; 5h's are in the layer stack). Expect **158 tests** and PASS.
+Then:
+
+```
+git checkout main
+git merge --no-ff feat/canyon-vortex -m "Merge feat/canyon-vortex: steps 8, 2b, 9 (canyon vortex, canyon routing, copy)"
+npm run check
+npm run build
+git push origin main
+git push origin --delete feat/canyon-vortex fix/road-band
+```
+
+Under this heading add `### Shipped <date> — merges <hash>, <hash>`; commit as `Record second
+queue`; push. Final report: the commit hashes per item, the Basemap and Result lines from
+`step5h` and `physics`, the production URL, and the two shots that need eyes (the boulevard at
+maximum zoom and at `=`×4, both on production).
 
 ---
 
