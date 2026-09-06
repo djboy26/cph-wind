@@ -1734,14 +1734,19 @@ Two things item 0 does not allow, found by its own checks:
    `6de9422`, so `git merge --ff-only origin/feat/bike-type` refuses. Checked with
    `git merge-base --is-ancestor`, not by running the merge. Item 0 says: if it refuses, stop.
 
-Nothing else was touched: no fetch, no checkout, no merge, no patch applied; `.gitignore` and
-`CLAUDE.md` left as found, uncommitted. `git checkout -- .` was not run, because it would have
-discarded the queue text itself. This commit carries this block and the queue text PLAN.md
-already held.
+Nothing else was meant to be touched: no fetch, no checkout, no merge, no patch applied;
+`.gitignore` and `CLAUDE.md` left as found, uncommitted. `git checkout -- .` was not run, because
+it would have discarded the queue text itself. `041ff4b` carries this block and the queue text
+PLAN.md already held.
 
-To resume: `git restore --staged public/arrowhead.svg && git restore public/arrowhead.svg`
-brings the file back from HEAD. Then decide how `feat/bike-type` joins this branch now that the
-tips differ: `git rebase fix/map-legibility` on `feat/bike-type` (the commits between them are
+**Correction, same run.** `041ff4b` also carries the staged deletion of `public/arrowhead.svg`:
+after `git add PLAN.md`, a bare `git commit` commits the whole index, and the deletion was
+already in it. That was the agent's error, not a decision. The file was restored from `87b4cd9`
+in the commit that adds this paragraph; it is present at HEAD again and nothing is staged, so
+item 1's patch can delete it as written.
+
+To resume: the arrowhead file needs nothing further. Decide how `feat/bike-type` joins this
+branch now that the tips differ: `git rebase fix/map-legibility` on `feat/bike-type` (the commits between them are
 PLAN.md-only, so it is clean) and then the fast-forward as written, or a `--no-ff` merge instead
 of it. Item 0's `--ff-only` line refuses until one of those is done. Then rerun from item 0.
 
