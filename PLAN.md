@@ -1888,6 +1888,10 @@ on `main`: `git checkout feat/canyon-vortex -- PLAN.md`, commit ("Plan: carry th
 PLAN.md onto main"), push — and rerun item 2 from its first line; rehearsed here with a
 throwaway commit on top of `main`: the merge is then clean.
 
+**Resumed 2026-09-06 — DJ's decision, option 1:** this PLAN.md (the superset) carried onto
+`main` by the next commit there, docs only, so the two copies match again; then item 2 rerun
+from its first line as written.
+
 ---
 
 ## The canyon model, reviewed 2026-09-04
