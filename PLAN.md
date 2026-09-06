@@ -2269,6 +2269,22 @@ canyon (99.5 %). The shared route Nørreport → Islands Brygge at 4.4 m/s from 
 46 / 51 / 51 s on the flat model, 56 / 62 / 69 s on the canyon model, and a fourth option
 appears (9.17 min, 2.47 km). Seconds, not minutes, as expected.
 
+### Completed 2026-09-06 — commit `744d387`, branch `feat/canyon-vortex`
+
+Applied with `git apply --3way step2b.patch` on `698df25` (Record Step 8), clean. The patch file
+was deleted before the commit and never committed. `npm run data:canyon` wrote
+`public/data/canyon-by-way.json` from the committed tiles: `36946 ways, 159201 pieces, 2.55 MB` (the item expects
+36946 ways, 159201 pieces, 2.55 MB); the table is in the step commit. `npm run check` green,
+**155 tests**. `npm run build` clean. `npm run shots -- step2b` ended `PASS`;
+`docs/renders/step2b/report.md` says `Basemap: loaded from CARTO.` No browser errors. The panel-routes
+row carries `canyonEdges 363142` (the queue expects 363142; the gate is above 300,000). The
+shared route Nørreport → Islands Brygge planned 4 routes, canyonEdges 363142; the panel read: 9 min / 2.47 km / +56 s into the wind / 9 min / 2.46 km / +1 min 2 s into the wind / 11 min / 2.82 km / +1 min 9 s into the wind / 11 min / 2.87 km / +1 min 16 s into the wind. Pushed.
+
+Changed beyond the patch: nothing but the generated table the step asks for.
+
+For a person: the route panel — the options and their wind costs under the canyon model, from
+the branch preview; `panel-routes.png` in `docs/renders/step2b/` on this machine meanwhile.
+
 ---
 
 ## Step 9 — Two lines of copy
