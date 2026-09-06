@@ -16,6 +16,8 @@ import {
 // Copenhagen city hall — used as a real-world reference point for bearing tests
 const CPH = { lon: 12.5683, lat: 55.6761 };
 
+const DEG = Math.PI / 180;
+
 describe('bearing', () => {
   it('returns ~0° for a point due north', () => {
     expect(bearing(CPH, { lon: CPH.lon, lat: CPH.lat + 0.01 })).toBeCloseTo(0, 1);
@@ -160,7 +162,13 @@ describe('computeSegmentLanes', () => {
       canyonH: 18,
     });
     const lanes = computeSegmentLanes(seg, { speedMs: 10, directionDeg: 90 });
-    expect(lanes[0].speedMs).not.toBeCloseTo(lanes[4].speedMs, 0);
+    // The two walls give the two edge lanes different local λ (1.53 and 0.47), so their
+    // flow vectors differ. Compared as vectors, not speeds: since Step 8 the deep side's
+    // cross flow is reversed, so the speeds can agree while the directions oppose.
+    const vec = (l: (typeof lanes)[number]) => [l.speedMs * Math.sin(l.flowDeg * DEG), l.speedMs * Math.cos(l.flowDeg * DEG)];
+    const [ax, ay] = vec(lanes[0]);
+    const [bx, by] = vec(lanes[4]);
+    expect(Math.hypot(ax - bx, ay - by)).toBeGreaterThan(0.5);
   });
 
   it('open field (no buildings): returns the boundary-layer-reduced ambient', () => {
@@ -278,5 +286,57 @@ describe('canyonModifiedWind — boundary layer', () => {
     // resistance() and alongStreetWind() reduce on their own and must not also
     // route through the canyon model, or they would compound.
     expect(Math.abs(resistance(0, ambient).headwindMs)).toBeCloseTo(6, 9);
+  });
+});
+
+describe('canyonModifiedWind — vortex (step 8)', () => {
+  // Street bearing 0 (north–south), ambient 8 m/s, so the rider-height reference is
+  // v = 8 × 0.6 = 4.8 m/s. λ from heightM / widthM with widthM fixed at 10.
+  const U = 8;
+  const v = U * 0.6;
+  const geom = (lambda: number): CanyonGeometry => ({ heightM: lambda * 10, widthM: 10 });
+  const crossX = (out: { speedMs: number; directionDeg: number }) =>
+    out.speedMs * Math.sin(((out.directionDeg + 180) % 360) * DEG);
+
+  it('λ = 1, wind straight across from the east: felt from the west at 0.4 v', () => {
+    const out = canyonModifiedWind(0, geom(1), { speedMs: U, directionDeg: 90 });
+    expect(Math.abs(out.directionDeg - 270)).toBeLessThan(1);
+    expect(out.speedMs).toBeCloseTo(v * 0.4, 9);
+  });
+
+  it('λ = 0.3, wind from the east: the old blockage, unchanged', () => {
+    const out = canyonModifiedWind(0, geom(0.3), { speedMs: U, directionDeg: 90 });
+    expect(Math.abs(out.directionDeg - 90)).toBeLessThan(1);
+    expect(out.speedMs).toBeCloseTo(v * Math.exp(-1.8 * 0.3), 9);
+  });
+
+  it('λ = 0.5, the foot of the blend: identical to the old formula', () => {
+    const out = canyonModifiedWind(0, geom(0.5), { speedMs: U, directionDeg: 90 });
+    expect(Math.abs(out.directionDeg - 90)).toBeLessThan(1);
+    expect(out.speedMs).toBeCloseTo(v * Math.exp(-1.8 * 0.5), 9);
+  });
+
+  it('λ = 1.2, wind from 45°: channelled along, reversed across', () => {
+    // Travel vector of the ambient at rider height: (−v/√2, −v/√2). Along the street
+    // (bearing 0) that is −v/√2, scaled by 1 + 0.3 × 1.2; across it −v/√2, scaled by −0.4.
+    const along = -Math.SQRT1_2 * v * (1 + 0.3 * 1.2);
+    const cross = -Math.SQRT1_2 * v * -0.4;
+    const out = canyonModifiedWind(0, geom(1.2), { speedMs: U, directionDeg: 45 });
+    expect(out.speedMs).toBeCloseTo(Math.hypot(along, cross), 6);
+    const travelDeg = (Math.atan2(cross, along) / DEG + 360) % 360; // ≈ 163.6
+    expect(Math.abs(out.directionDeg - ((travelDeg + 180) % 360))).toBeLessThan(0.1); // ≈ 343.6
+  });
+
+  it('the cross component moves smoothly through the sign change', () => {
+    let prev: number | null = null;
+    let worst = 0;
+    for (let lambda = 0.3; lambda <= 1.2001; lambda += 0.01) {
+      const x = crossX(canyonModifiedWind(0, geom(lambda), { speedMs: U, directionDeg: 90 }));
+      if (prev !== null) worst = Math.max(worst, Math.abs(x - prev));
+      prev = x;
+    }
+    // The blend's steepest slope is ~4 per unit λ on a 0.8-wide swing of v: ~0.19 m/s per
+    // 0.01 step. A hard flip would be a ~2 m/s jump.
+    expect(worst).toBeLessThan(0.25);
   });
 });

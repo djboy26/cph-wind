@@ -74,7 +74,8 @@ export default function About({ open, onClose }: { open: boolean; onClose: () =>
         </p>
         <p style={para}>
           An urban canyon model (Soulhac et al., 2008) then channels that wind down the street: wind
-          flowing along the street speeds up, wind across it dies down. Arrows stay on the carriageway and
+          flowing along the street speeds up, wind across it dies down, and in a deep street it turns back
+          on itself near the ground. Arrows stay on the carriageway and
           are coloured by a cyclist wind scale. Tap a street to see its head or tailwind.
         </p>
 
