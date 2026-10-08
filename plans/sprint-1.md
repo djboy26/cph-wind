@@ -167,6 +167,20 @@ Two deviations from the written commands, neither affecting a result:
 Still open, by design: the two "Needs eyes" items above, and the post-merge DMI row count, which
 cannot be recorded until two days after the merge.
 
+**New finding, from using this change: the deploy filter also suppresses sprint previews.**
+`ignoreCommand` compares `HEAD^ HEAD` — one commit. The workflow in step 4 of this plan ends every
+item with a docs-only `Record Step <n>` commit, so a sprint branch's tip is *always* docs-only and
+Vercel cancels its preview: "Canceled by Ignored Build Step". That is what happened on the first
+push of `sprint-1` (deployment `dpl_G2E6S341ZJkVgS3ZC8Zg9pSZQYqF`, CANCELED, commit 38454cd).
+Correct by the rule as written, and exactly wrong for D3, which makes the preview the subjective
+gate for anything a person sees.
+
+Worked around for this PR without changing any project setting, by deploying the branch at its
+last code commit, 3fa9eb0 (item 2), where `HEAD^ HEAD` does contain code. A durable fix belongs
+with the reviewer; the obvious candidates are to compare against the deployment's base rather than
+one commit (`VERCEL_GIT_PREVIOUS_SHA`), or to exempt preview deployments from the filter and skip
+only production builds, which is the finding the rule was written for.
+
 ## Item 2: animation rewrite (`s1-animation.patch`)
 
 Finding 1. The arrows' brightness wave was computed on the CPU every frame. `useFlowPhase` set
