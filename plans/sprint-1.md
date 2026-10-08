@@ -303,6 +303,63 @@ Acceptance:
 - Harness PASS with the numbers of item 2.
 - `dist/` is about 67 MiB and has no `cph-buildings.json`.
 
+### BLOCKED 2026-10-09 — not committed
+
+`s1-data.patch` **applied cleanly** (`git apply --3way --check` then `git apply --3way`, both
+exit 0, no conflict, no rejected hunk, 22 files changed), and `npm run data:check` printed the
+acceptance line exactly:
+
+```
+data: 163 files match data.lock.json (version 5d464b01f465, 64.3 MiB).
+```
+
+Then `npm run check` **failed**: 2 of 191 tests fail, both in `scripts/data/pull.test.mjs`.
+Lint was clean and the other 189 tests in 19 files pass, so the counts are otherwise the
+expected 191 in 19.
+
+```
+× rejects a download whose content does not match the lock, and writes nothing
+× a file missing from the bucket is a clear 404, not a retry loop
+AssertionError: expected 3221226505 to be 1
+```
+
+Per the operator's standing rule and step 5 above, work stopped here: nothing was changed to
+make the tests pass, `npm run build`/`npm run shots -- s1-data` were not run, and no item 3
+commit exists. The applied patch is left in the working tree, uncommitted, and
+`s1-data.patch` is still at the repo root.
+
+**Diagnosis.** It is `data-pull.mjs`'s error path crashing on Windows instead of exiting 1.
+`fetchVerified()` is correct and so are its messages — a direct repro shows the script printing
+exactly what lines 82 and 103 assert, `content does not match the lock` and
+`404, not in the bucket`. What follows it is not:
+
+```
+data: pull failed: …/public/data/cph-roads.json: 404, not in the bucket (was version v1 published?)
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 94
+exit status 3221226505 (0xC0000409)
+```
+
+`CONCURRENCY` is 8 and the failing tests are the only two where a download *rejects*, so
+`process.exit(1)` at line 109 runs while sibling workers still hold in-flight `fetch` sockets.
+libuv then tears the loop down over an async handle that is already closing, trips the assertion
+in its Windows backend (`src\win\async.c`), and aborts; 0xC0000409 is Windows' fail-fast code,
+not an exit status the script chose. The three other failure paths in the same file
+(`--check`, "differ from the lock", "has not been published") all `process.exit(1)` *before* any
+fetch starts, and all three pass.
+
+So this is platform-specific, in `src\win\async.c` by name: Node 24.16.0 on win32 x64 here,
+against the Linux review side where the suite was green. It is confined to the error path —
+a *successful* pull exits 0 and is unaffected, which is why `data:check`, `prebuild` and
+`pretest` all work and why items 1 and 2 were unaffected.
+
+It is not purely cosmetic, though: `prebuild` and `predev` run `data:pull`, so on a Windows
+machine a genuinely failed pull aborts with a libuv assertion instead of the script's clean
+`exit 1`. The failure is still non-zero, so a build still stops; the operator just sees a crash
+rather than the diagnosis the script took care to write. Vercel and CI build on Linux and are
+unaffected.
+
+Over to the reviewer. The fix belongs in `data-pull.mjs` on the review side, not here.
+
 ## Item 4: data out of git, part 2: the cutover
 
 ### DJ's part, about 15 minutes, once
