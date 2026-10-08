@@ -26,6 +26,7 @@ import About from "./components/About";
 import OnboardingHint from "./components/OnboardingHint";
 import TimeSlider from "./components/TimeSlider";
 import AdvisoryChip from "./components/Advisory";
+import Attribution from "./components/Attribution";
 import { cyclingAdvisory } from "./cyclist/advisory";
 import { bestRideWindow } from "./cyclist/bestWindow";
 import { forecastNote } from "./cyclist/routeCopy";
@@ -940,7 +941,17 @@ function MapApp() {
         left: "calc(env(safe-area-inset-left) + 10px)",
         zIndex: 20,
       }
-    : { position: "absolute", bottom: 16, right: 16, zIndex: 20 };
+    // Desktop: 12 px above the bottom edge leaves the credit line its own row under it.
+    : { position: "absolute", bottom: 28, right: 16, zIndex: 20 };
+
+  // The map credit (OSM/CARTO) must stay on screen. Desktop: its own row under the
+  // legend. Phone: right-aligned on the legend's row (the legend pill sits left); while
+  // the route sheet owns the bottom, just under the top bar.
+  const attributionStyle: React.CSSProperties = isMobile
+    ? routing
+      ? { position: "absolute", top: "calc(env(safe-area-inset-top) + 62px)", right: "calc(env(safe-area-inset-right) + 10px)", zIndex: 19 }
+      : { position: "absolute", bottom: `calc(env(safe-area-inset-bottom) + ${showSlider ? 122 : 14}px)`, right: "calc(env(safe-area-inset-right) + 10px)", zIndex: 19 }
+    : { position: "absolute", bottom: 6, right: 16, zIndex: 19 };
 
   const sliderStyle: React.CSSProperties = isMobile
     ? {
@@ -971,8 +982,9 @@ function MapApp() {
         <MapLibreMap
           reuseMaps
           mapStyle={MAP_STYLE}
-          // Hide the on-map credit line (it overlapped the wind scale on phones);
-          // full OSM / CARTO / MapLibre attribution lives in the About dialog.
+          // MapLibre's own control sits under the deck canvas and fought the wind scale on
+          // phones; the app draws the credit itself (components/Attribution) where the
+          // layout has room for it. The About dialog keeps the full list.
           attributionControl={false}
           onLoad={(e: { target: maplibregl.Map }) => applyDaylight(e.target)}
         />
@@ -1054,6 +1066,8 @@ function MapApp() {
           />
         </div>
       )}
+
+      <Attribution style={attributionStyle} short={isMobile} />
 
       {!stillLoading && <OnboardingHint isMobile={isMobile} />}
 

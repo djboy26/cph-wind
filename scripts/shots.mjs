@@ -50,7 +50,8 @@ const WINDS = [
 
 const server = await serveDist(join(root, "dist"));
 const base = `http://127.0.0.1:${server.port}`;
-const browser = await chromium.launch();
+// PW_EXECUTABLE_PATH lets a sandboxed reviewer point Playwright at a preinstalled Chromium.
+const browser = await chromium.launch(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {});
 const errors = [];
 const report = [];
 let failed = false;

@@ -6,7 +6,10 @@ name: validate-wind
 
 on:
   schedule:
-    - cron: "0 * * * *" # hourly, UTC (GitHub may delay under load)
+    # Hourly at :23 UTC, not :00. GitHub delays and drops scheduled runs at the start of
+    # every hour (about 5 of the 24 runs a day reached the log after 2026-09-07), and MET
+    # Norway's terms ask clients not to call on the hour.
+    - cron: "23 * * * *"
   workflow_dispatch: {}   # allow manual runs from the Actions tab
 
 # Avoid overlapping runs racing on the same commit.
@@ -25,7 +28,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       # No `npm install`: the script depends only on Node built-ins + global fetch.
       - name: Collect a validation sample
