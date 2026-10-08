@@ -64,6 +64,23 @@ git commit -m "Sprint 1 plan, decisions D1-D4, Milestone 2 draft (to be revised)
 
 Acceptance: `git status --short` shows nothing but `?? .claude/` (the patch files are gitignored).
 
+### Completed 2026-10-09 — commit 93e506d
+
+Branch `sprint-1` cut from `main` at 55e0327, a clean fast-forward of 172 bot commits from
+1e57657. The patches' base, 04049a9, is an ancestor of that and only `validation-log.ndjson`
+differs between the two, as this plan predicted.
+
+158 tests in 13 files pass (`npm run test:run`) — the unchanged baseline. No harness run for this
+item.
+
+Acceptance met with one deviation: `git status --short` shows `?? cph-wind-status.md`,
+`?? decisions.md` and `?? sprint-1.md` rather than nothing. Those are the reviewer's hand-off
+copies delivered at the repo root — the root `sprint-1.md` is the pre-`:23`-cron draft of this
+file and the root `decisions.md` is byte-identical to `docs/decisions.md`. The operator's
+standing instruction is never to delete a hand-off file, so they stay untracked and unstaged.
+`?? .claude/` does not appear; that directory holds only `settings.local.json` and is excluded
+outside this repo's `.gitignore`.
+
 ## Item 1: hygiene and compliance (`s1-hygiene.patch`)
 
 | finding | change |
