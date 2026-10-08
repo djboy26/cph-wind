@@ -131,6 +131,42 @@ Needs eyes, on the preview:
 - The text is still Inter, and the browser's network tab shows no request to
   `fonts.googleapis.com` or `fonts.gstatic.com`.
 
+### Completed 2026-10-09 — commit 72dc995
+
+`s1-hygiene.patch` applied with `git apply --3way` at exit 0, no conflict and no rejected hunk;
+`git apply --3way --check` was run first and also passed. 29 files changed.
+
+- `npm ci` from the new lockfile succeeded. `npm ls @arcgis/core` prints `(empty)`.
+  `node_modules` is 329 MiB measured with `du -sh` here, against the 382 MiB recorded on the
+  review side — a measurement difference, not a content one, and not an acceptance number.
+- `npm run check`: lint clean, **164 tests in 14 files pass**. Matches.
+- `npm run build` green. Inter ships as eight bundled files in `dist/assets/`
+  (`inter-latin-{400,500,600,700}-normal` as `.woff2` and `.woff`), which is the build-side half
+  of the Google-fonts finding.
+- `npm run shots -- s1-hygiene`: **PASS**, `Basemap: loaded from CARTO`, `No browser errors`.
+  Arrow counts equal the acceptance line exactly, for both winds — city-desktop 5177,
+  city-phone 1169, z16.5 2103, z17.5 3177, z18.5-boulevard 6708, z17.5-pitch40 4705,
+  z17.5-phone 1709; `panel-routes` planned 4 routes with canyonEdges 363142.
+- DMI host: the acceptance one-liner prints `1` and an observation — station 06180,
+  `wind_speed` 5.66, observed 2026-10-08T20:10:00Z. `validate-wind.mjs` itself was not run.
+- Deploy filter after this commit: exit `1`, so Vercel builds it. Correct.
+
+Two deviations from the written commands, neither affecting a result:
+
+- Playwright had no browser on this machine at all (`ms-playwright/` did not exist), so the
+  first harness run died on `Executable doesn't exist`. The operator's fallback
+  `PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium` is a Linux sandbox path and does not exist
+  here, so the fix was `CLAUDE.md`'s own documented first-run step,
+  `npx playwright install chromium` (Chrome Headless Shell 153.0.8010.12, chromium-headless-shell
+  v1243). The harness then ran as above.
+- `rm s1-hygiene.patch` was **not** run. The operator's standing instruction for this session is
+  never to delete a hand-off file, and `CLAUDE.md` calls the root `.patch` files exactly that.
+  They are gitignored by `/*.patch`, so keeping them changes no acceptance check and leaves
+  nothing uncommitted. The same applies to items 2 and 3.
+
+Still open, by design: the two "Needs eyes" items above, and the post-merge DMI row count, which
+cannot be recorded until two days after the merge.
+
 ## Item 2: animation rewrite (`s1-animation.patch`)
 
 Finding 1. The arrows' brightness wave was computed on the CPU every frame. `useFlowPhase` set
