@@ -22,7 +22,7 @@ import type { RawSegment } from './buildWindArrows';
 
 const DEG = Math.PI / 180;
 // Brightness-wave speed, cycles per second (period 4 s).
-const RATE = 0.25;
+export const WAVE_RATE = 0.25;
 // Wavelength of the brightness wave, in lattice pitches.
 const WAVELENGTH_CELLS = 6;
 
@@ -251,26 +251,116 @@ function arrowPosition(d: Pick<FlowLine, 'lon' | 'lat' | 'bearingDeg' | 'baseAlo
 // Arrows never move and never vanish. Direction is animated as a soft brightness wave
 // that travels downwind through the field: the arrow's own opacity (speed) modulated
 // by ±WAVE_DEPTH.
-const WAVE_DEPTH = 0.15;
-function arrowAlpha(d: FlowLine, time: number): number {
-  const w = Math.sin(2 * Math.PI * (d.phase - time * RATE));
-  return d.alpha * (1 - WAVE_DEPTH + WAVE_DEPTH * w);
+//
+// The wave runs on the GPU. Each arrow's base colour, opacity and phase are uploaded once
+// when the field is built; every frame only one uniform changes, so a frame costs no
+// accessor calls and no buffer uploads however many arrows are on screen. (Until sprint 1
+// the layer recomputed every arrow's colour on the CPU each frame through
+// `updateTriggers: { getColor: time }`, and the whole React tree re-rendered with it.)
+export const WAVE_DEPTH = 0.15;
+
+/**
+ * Where the wave is in its cycle at timeS seconds, in [0, 1). Taken modulo one cycle here,
+ * in double precision, so the shader's sin() only ever sees an argument inside ±2π: a raw
+ * clock would reach 2π × 21 600 rad after a day open, where 32-bit floats step by 1/64 rad
+ * and some mobile GPUs' sin() is no longer accurate.
+ */
+export function waveCycle(timeS: number): number {
+  return ((timeS * WAVE_RATE) % 1 + 1) % 1;
+}
+
+/** The brightness factor the shader applies: 1 − depth + depth·sin(2π(phase − t·rate)). Mirrors WAVE_GLSL. */
+export function waveFactor(phase: number, timeS: number, depth = WAVE_DEPTH): number {
+  return 1 - depth + depth * Math.sin(2 * Math.PI * (phase - waveCycle(timeS)));
+}
+
+/** Seconds on one clock for every layer instance, so rebuilding the field never makes the wave jump. */
+const CLOCK_T0 = typeof performance !== 'undefined' ? performance.now() : 0;
+export function waveClockSeconds(): number {
+  return ((typeof performance !== 'undefined' ? performance.now() : 0) - CLOCK_T0) / 1000;
+}
+
+const WAVE_UNIFORM_BLOCK = `\
+layout(std140) uniform waveUniforms {
+  float cycle;
+  float depth;
+} wave;
+`;
+
+/** luma.gl shader module carrying the wave's uniforms. */
+const waveUniforms = {
+  name: 'wave',
+  vs: WAVE_UNIFORM_BLOCK,
+  uniformTypes: { cycle: 'f32', depth: 'f32' },
+} as const;
+
+/** GLSL appended to the IconLayer vertex shader: scales the arrow's alpha by the wave factor. */
+export const WAVE_GLSL =
+  'vColor.a *= (1.0 - wave.depth) + wave.depth * sin(6.283185307179586 * (instancePhases - wave.cycle));';
+
+interface WaveProps {
+  /** Position along the ambient wind in wavelengths, 0..1 (FlowLine.phase). */
+  getPhase?: (d: FlowLine) => number;
+  /** false holds the wave still (prefers-reduced-motion): depth 0, base opacity only. */
+  animate?: boolean;
+}
+
+/** IconLayer with the downwind brightness wave computed in the vertex shader. */
+export class WaveIconLayer extends IconLayer<FlowLine, WaveProps> {
+  static layerName = 'WaveIconLayer';
+  static defaultProps = {
+    ...IconLayer.defaultProps,
+    getPhase: { type: 'accessor' as const, value: 0 },
+    animate: true,
+  };
+
+  getShaders() {
+    const shaders = super.getShaders();
+    return {
+      ...shaders,
+      modules: [...(shaders.modules ?? []), waveUniforms],
+      inject: {
+        ...(shaders.inject ?? {}),
+        'vs:#decl': 'in float instancePhases;',
+        'vs:#main-end': WAVE_GLSL,
+      },
+    };
+  }
+
+  initializeState() {
+    super.initializeState();
+    this.getAttributeManager()?.addInstanced({
+      instancePhases: { size: 1, accessor: 'getPhase', defaultValue: 0 },
+    });
+  }
+
+  draw(opts: Parameters<IconLayer<FlowLine>['draw']>[0]) {
+    this.state.model?.shaderInputs.setProps({
+      wave: { cycle: waveCycle(waveClockSeconds()), depth: this.props.animate ? WAVE_DEPTH : 0 },
+    });
+    super.draw(opts);
+  }
 }
 
 interface FlowLineLayerOpts {
   data: FlowLine[];
-  /** Continuously increasing seconds — drives the brightness wave. */
-  time: number;
+  /** false (reduced motion): the wave holds still. The caller drives redraws while true. */
+  animate: boolean;
   /** Kept for the caller; the glyph size is decided in buildFlowField. */
   isMobile: boolean;
   onHover?: (info: { object?: FlowLine; x: number; y: number }) => void;
   onClick?: (info: { object?: FlowLine; x: number; y: number }) => boolean;
 }
 
-/** One IconLayer: the arrow glyph, one size, rotated to the wind. */
-export function createFlowLineLayer({ data, time, onHover, onClick }: FlowLineLayerOpts): Layer[] {
+/** Static per-arrow colour: shelter colour, opacity from absolute speed. The wave is applied on the GPU. */
+export function arrowColor(d: FlowLine): [number, number, number, number] {
+  return [d.color[0], d.color[1], d.color[2], Math.round(255 * d.alpha)];
+}
+
+/** One layer: the arrow glyph, one size, rotated to the wind, wave in the shader. */
+export function createFlowLineLayer({ data, animate, onHover, onClick }: FlowLineLayerOpts): Layer[] {
   return [
-    new IconLayer<FlowLine>({
+    new WaveIconLayer({
       id: 'wind-flow-arrows',
       data,
       getIcon: () => 'arrow',
@@ -280,15 +370,13 @@ export function createFlowLineLayer({ data, time, onHover, onClick }: FlowLineLa
       getSize: (d) => d.sizePx,
       getPosition: (d) => arrowPosition(d),
       getAngle: (d) => 90 - d.flowDeg,
-      getColor: (d) => {
-        const a = arrowAlpha(d, time);
-        return [d.color[0], d.color[1], d.color[2], Math.round(255 * a)];
-      },
+      getColor: arrowColor,
+      getPhase: (d) => d.phase,
+      animate,
       pickable: true,
       billboard: false,
       onHover,
       onClick,
-      updateTriggers: { getColor: time },
     }),
   ];
 }

@@ -2,6 +2,7 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import DeckGL from "@deck.gl/react";
+import type { DeckGLRef } from "@deck.gl/react";
 import { PathLayer, ScatterplotLayer, PolygonLayer } from "@deck.gl/layers";
 import { WebMercatorViewport, Layer } from "@deck.gl/core";
 import type { PickingInfo } from "@deck.gl/core";
@@ -11,6 +12,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import type { Feature, FeatureCollection, LineString } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
+import { useReducedMotion } from "./hooks/useReducedMotion";
+import { useRedrawLoop } from "./hooks/useRedrawLoop";
 import { reverseGeocode } from "./api/geocode";
 import { arrowDensityForZoom, type RawSegment } from "./layers/buildWindArrows";
 import { offsetAlongBearing, type GeometrySource } from "./math";
@@ -176,33 +179,6 @@ function useIsMobile() {
   return isMobile;
 }
 
-// Continuously increasing seconds (wrapped well above any animation cycle).
-// The FlowLineLayer derives per-arrow drift from this, so keeping it smooth and
-// unwrapped avoids visible jumps when arrows animate at different rates.
-//
-// Each tick re-renders the app, so we cap the emit rate via minIntervalMs (30 fps
-// on phones) — the drift advances by real elapsed time, so motion stays the same
-// speed, we just spend half the CPU on a mobile GPU/CPU. 0 = every frame.
-function useFlowPhase(minIntervalMs = 0) {
-  const [flowPhase, setFlowPhase] = useState(0);
-  const rafRef = useRef<number>(0);
-
-  useEffect(() => {
-    let lastEmit = performance.now();
-    const tick = (now: number) => {
-      rafRef.current = requestAnimationFrame(tick);
-      const dt = now - lastEmit;
-      if (dt < minIntervalMs) return;
-      lastEmit = now;
-      setFlowPhase((p) => (p + dt / 1000) % 3600);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [minIntervalMs]);
-
-  return flowPhase;
-}
-
 function useWindowSize() {
   const [size, setSize] = useState(() => ({
     width: typeof window !== "undefined" ? window.innerWidth : 1280,
@@ -254,9 +230,6 @@ class ErrorBoundary extends Component<{ children: ReactNode; silent?: boolean },
 const SNAP_DEG = 0.004;
 const BOUNDS_PAD = 0.25;
 const MAX_SPAN_DEG = 0.12;
-// Each street gets a few arrows whose positions are recomputed per frame on the CPU,
-// so cap how many streets we draw (thinned evenly across the view) to stay smooth.
-
 // --- Segment tiles (built by scripts/tile-segments.mjs; loaded per viewport) ---
 // Streets are split into a spatial grid so the phone downloads only what's in view
 // (~tens of KB) instead of the whole 21.7 MB city. Each segment is a lean tuple;
@@ -312,9 +285,8 @@ function writeStoredBikeType(t: BikeType): void {
 
 function MapApp() {
   const isMobile = useIsMobile();
-  // 30 fps on phones (now that 3D is off there's headroom for a livelier field),
-  // 60 on desktop.
-  const flowPhase = useFlowPhase(isMobile ? 1000 / 30 : 0);
+  const reducedMotion = useReducedMotion();
+  const deckRef = useRef<DeckGLRef | null>(null);
   const windowSize = useWindowSize();
 
   // A view can be named in the URL hash — #z=17.5&lat=55.673&lon=12.578&pitch=0 — so a
@@ -743,12 +715,16 @@ function MapApp() {
   }, [visibleSegments, viewState.zoom]);
 
   // A read-only probe for the screenshot harness (scripts/shots.mjs), so a run can
-  // assert "arrows were drawn at this view" instead of eyeballing a PNG. Nothing in
-  // the app reads it.
+  // assert "arrows were drawn at this view" instead of eyeballing a PNG. `arrows` counts
+  // the field the CPU built; `drawnArrows()` counts the arrows the GPU actually drew, read
+  // back from deck.gl's picking buffer, so an arrow shader that fails to compile reads 0.
+  // Nothing in the app reads it.
   useEffect(() => {
     (window as unknown as { __cphwind?: unknown }).__cphwind = {
       zoom: zoomQ,
       arrows: flowLines.length,
+      drawnArrows: () =>
+        deckRef.current?.pickObjects({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight, layerIds: ["wind-flow-arrows"] }).length ?? null,
       tiles: Object.keys(tileCache).length,
       windMs: activeWind?.speedMs ?? null,
       canyonEdges,
@@ -772,8 +748,8 @@ function MapApp() {
   }, []);
 
   // 3D building extrusions sit at the bottom of the stack. Memoised separately so
-  // they are NOT rebuilt on every animation frame (only when the visible set
-  // changes) — extruding ~thousands of footprints 60×/s would crush a phone.
+  // they are NOT rebuilt on every pan frame (only when the visible set changes);
+  // extruding thousands of footprints 60 times a second would crush a phone.
   const buildingLayers = useMemo(() => {
     if (!visibleBuildings || visibleBuildings.length === 0) return [];
     return [
@@ -845,14 +821,13 @@ function MapApp() {
     return result;
   }, [routing, rankedRoutes, selectedRoute, bestId, start, end]);
 
-  // Animated dashed flow streaks (oriented in the wind direction). Rebuilt per frame
-  // (flowPhase), but that only updates a single GPU time uniform — the path/color
-  // attributes are unchanged, so it's cheap. Also the pick target for the tooltip.
+  // The arrow field, and the pick target for the tooltip. Rebuilt only when the field or
+  // the interaction mode changes; the brightness wave runs in its shader (useRedrawLoop).
   const flowLineLayers = useMemo(() => {
     if (flowLines.length === 0) return [] as Layer[];
     return createFlowLineLayer({
       data: flowLines,
-      time: flowPhase,
+      animate: !reducedMotion,
       isMobile,
       // While planning a route, clicks set waypoints instead of pinning a street.
       onHover: isMobile || routing ? undefined : (info) => {
@@ -863,7 +838,11 @@ function MapApp() {
         return true;
       },
     });
-  }, [flowLines, flowPhase, isMobile, routing]);
+  }, [flowLines, reducedMotion, isMobile, routing]);
+
+  // The wave's frame clock: 30 redraws a second on phones, 60 on desktop, none while
+  // reduced motion is on or no arrows are drawn. Nothing in React re-renders for it.
+  useRedrawLoop(flowLineLayers[0], isMobile ? 30 : 60, !reducedMotion && flowLines.length > 0);
 
   // Bike lanes from the same OSM download the router uses: dedicated cycleways as a
   // solid green line, roads with a track or lane as a thinner one. From zoom 15, so the
@@ -969,6 +948,7 @@ function MapApp() {
   return (
     <div className="app-root" style={{ position: "relative", background: THEME.land, overflow: "hidden" }}>
       <DeckGL
+        ref={deckRef}
         initialViewState={initialViewState}
         viewState={viewState}
         onViewStateChange={onViewStateChange}

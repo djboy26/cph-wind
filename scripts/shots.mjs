@@ -8,9 +8,12 @@
 // would see. Every view is fixed by URL hash (#z=…&lat=…&lon=…), so two runs of the
 // same commit differ only in what the code draws.
 //
-// The run FAILS (exit 1) when a page throws, or when a view that must show arrows
-// draws none (read from window.__cphwind, the probe App.tsx exposes). It does not fail
-// on basemap tile errors — those are reported, because a machine without internet
+// The run FAILS (exit 1) when a page throws, when a view that must show arrows builds
+// none or the GPU draws none of them (both read from window.__cphwind, the probe App.tsx
+// exposes; the GPU count comes back from deck.gl's picking buffer, so a broken arrow
+// shader fails the run), or when the arrows' brightness wave does not move, or the map
+// does not hold still with the operating system's reduce-motion setting on. It does not
+// fail on basemap tile errors — those are reported, because a machine without internet
 // access still gets useful pictures of the app's own layers.
 //
 // This is the one sanctioned way to look at the app from a machine that cannot open a
@@ -56,10 +59,11 @@ const errors = [];
 const report = [];
 let failed = false;
 
-async function openPage(wind, vp, mobile, { onboarded = true } = {}) {
+async function openPage(wind, vp, mobile, { onboarded = true, reducedMotion = false } = {}) {
   const ctx = await browser.newContext({
     viewport: { width: vp[0], height: vp[1] },
     deviceScaleFactor: 1,
+    reducedMotion: reducedMotion ? "reduce" : "no-preference",
     isMobile: !!mobile, hasTouch: !!mobile,
     userAgent: mobile ? "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1" : undefined,
   });
@@ -88,8 +92,13 @@ async function snap(page, path) {
   const cdp = await page.context().newCDPSession(page);
   const { data } = await cdp.send("Page.captureScreenshot", { format: "png" });
   await cdp.detach();
-  await writeFile(path, Buffer.from(data, "base64"));
+  const png = Buffer.from(data, "base64");
+  if (path) await writeFile(path, png);
+  return png;
 }
+
+/** Arrows the GPU drew in the current frame (null on a build without the probe). */
+const drawnArrows = (page) => page.evaluate(() => window.__cphwind?.drawnArrows?.() ?? null);
 
 /** Wait until the probe reports at least `min` arrows, or the deadline passes. */
 async function waitForArrows(page, min, ms = 30_000) {
@@ -103,12 +112,12 @@ async function waitForArrows(page, min, ms = 30_000) {
   return p;
 }
 
-function record(name, p, basemap, want) {
+function record(name, p, basemap, want, drawn = null) {
   const arrows = p?.arrows ?? 0;
-  const ok = want === 0 || arrows >= want;
+  const ok = want === 0 || (arrows >= want && drawn !== 0);
   if (!ok) failed = true;
-  report.push({ name, ok, arrows, want, zoom: p?.zoom ?? null, tiles: p?.tiles ?? null, basemap });
-  console.log(`${ok ? "ok  " : "FAIL"} ${name.padEnd(28)} arrows=${String(arrows).padStart(5)} (min ${want})  tiles=${p?.tiles ?? "?"}  basemap ${basemap.ok} ok / ${basemap.failed} failed`);
+  report.push({ name, ok, arrows, drawn, want, zoom: p?.zoom ?? null, tiles: p?.tiles ?? null, basemap });
+  console.log(`${ok ? "ok  " : "FAIL"} ${name.padEnd(28)} arrows=${String(arrows).padStart(5)} (min ${want})  drawn=${drawn ?? "?"}  tiles=${p?.tiles ?? "?"}  basemap ${basemap.ok} ok / ${basemap.failed} failed`);
 }
 
 for (const wind of WINDS) {
@@ -118,9 +127,49 @@ for (const wind of WINDS) {
     const p = await waitForArrows(page, v.arrows);
     await page.waitForTimeout(2500); // basemap tiles and the building layer stream in after the field
     await snap(page, join(outDir, `${v.name}-${wind.tag}.png`));
-    record(`${v.name}-${wind.tag}`, p, basemap, v.arrows);
+    record(`${v.name}-${wind.tag}`, p, basemap, v.arrows, await drawnArrows(page));
     await ctx.close();
   }
+}
+
+// The arrows' brightness wave (sprint 1: it runs in the arrow shader). Reduce-motion first:
+// the page must come to rest (two frames 1 s apart identical, within 20 s) and stay at rest
+// for 2 s, which proves nothing else on the map moves once loaded. Then, animating, after the
+// same time to rest plus a second, two frames 2 s apart must differ: only the wave can do that.
+async function restingFrame(page, ms = 20_000) {
+  let prev = await snap(page);
+  for (const t0 = Date.now(); Date.now() - t0 < ms; ) {
+    await page.waitForTimeout(1000);
+    const next = await snap(page);
+    if (next.equals(prev)) return next;
+    prev = next;
+  }
+  return null;
+}
+let restMs = 2500;
+for (const reduced of [true, false]) {
+  const name = reduced ? "wave-reduced-motion" : "wave-animating";
+  const { ctx, page, basemap } = await openPage(WINDS[0], [1440, 900], false, { reducedMotion: reduced });
+  await page.goto(`${base}/#z=17.5&lat=${HCA.lat}&lon=${HCA.lon}&pitch=0`, { waitUntil: "networkidle", timeout: 90_000 });
+  await waitForArrows(page, 200);
+  let a;
+  if (reduced) {
+    const t0 = Date.now();
+    a = await restingFrame(page);
+    restMs = Date.now() - t0;
+  } else {
+    await page.waitForTimeout(restMs + 1000);
+    a = await snap(page);
+  }
+  await page.waitForTimeout(2000);
+  const b = await snap(page);
+  const moved = !a || !a.equals(b);
+  const ok = reduced ? !moved : moved;
+  const what = !a ? "never came to rest in 20 s" : moved ? "frames differ" : "frames identical";
+  if (!ok) failed = true;
+  report.push({ name, ok, wave: what, basemap });
+  console.log(`${ok ? "ok  " : "FAIL"} ${name.padEnd(28)} ${what} (want ${reduced ? "identical" : "differ"})`);
+  await ctx.close();
 }
 
 // The onboarding hint, once, on the opening view.
@@ -130,7 +179,7 @@ for (const wind of WINDS) {
   const p = await waitForArrows(page, 200);
   await page.waitForTimeout(1500);
   await snap(page, join(outDir, "hint-desktop.png"));
-  record("hint-desktop", p, basemap, 200);
+  record("hint-desktop", p, basemap, 200, await drawnArrows(page));
   await ctx.close();
 }
 
@@ -186,9 +235,11 @@ const lines = [
   `Basemap: ${anyBasemap ? "loaded from CARTO" : "NOT loaded (no tile responses — offline machine?); pictures show the app's own layers only"}.`,
   `Result: ${failed || fatal.length ? "FAIL" : "PASS"}.`,
   "",
-  "| shot | ok | arrows | min | zoom | tiles | basemap ok/failed |",
-  "|---|---|---|---|---|---|---|",
-  ...report.map((r) => `| ${r.name} | ${r.ok ? "yes" : "NO"} | ${r.arrows ?? (r.routes !== undefined ? `${r.routes} routes, canyonEdges ${r.canyonEdges}` : "")} | ${r.want ?? ""} | ${r.zoom ?? ""} | ${r.tiles ?? ""} | ${r.basemap ? `${r.basemap.ok}/${r.basemap.failed}` : ""} |`),
+  "`arrows` is the field the CPU built for the view, padding included; `drawn` is how many of them the GPU drew on screen.",
+  "",
+  "| shot | ok | arrows | drawn | min | zoom | tiles | basemap ok/failed |",
+  "|---|---|---|---|---|---|---|---|",
+  ...report.map((r) => `| ${r.name} | ${r.ok ? "yes" : "NO"} | ${r.arrows ?? (r.routes !== undefined ? `${r.routes} routes, canyonEdges ${r.canyonEdges}` : r.wave ?? "")} | ${r.drawn ?? ""} | ${r.want ?? ""} | ${r.zoom ?? ""} | ${r.tiles ?? ""} | ${r.basemap ? `${r.basemap.ok}/${r.basemap.failed}` : ""} |`),
   "",
   errors.length ? `## Browser messages\n\n${[...new Set(errors)].map((e) => `- ${e}`).join("\n")}` : "No browser errors.",
   "",
