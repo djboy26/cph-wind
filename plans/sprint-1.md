@@ -237,6 +237,31 @@ Needs eyes, on the preview next to production (https://cph-wind.vercel.app):
   wave back without a reload.
 - Desktop: hovering a street still shows its tooltip and clicking still pins it.
 
+### Completed 2026-10-09 — commit 3fa9eb0
+
+`s1-animation.patch` applied with `git apply --3way` at exit 0, no conflict and no rejected hunk
+(`--check` first, also clean). 7 files changed.
+
+- `npm run check`: lint clean, **175 tests in 15 files pass**. Matches.
+- `npm run build` green.
+- `npm run shots -- s1-animation`: **PASS**, `Basemap: loaded from CARTO`, `No browser errors`.
+  Arrow counts unchanged from item 1 on all 14 field views, and `panel-routes` again planned
+  4 routes with canyonEdges 363142.
+- The shader compiles and the GPU draws: `drawn` is above 0 on every view. For the sw4 views in
+  table order this machine read back **2591 / 451 / 553 / 475 / 490 / 677 / 119** against the
+  review side's 2592 / 451 / 553 / 475 / 490 / 677 / 119 — six of seven identical, and
+  city-desktop one arrow lower. The same view read 2592 under `hint-desktop` and 2585 under nw9
+  in this run, so the picking read-back varies by about one arrow at the edge of a 5,177-arrow
+  field. Nothing in the acceptance turns on it; the gate is `drawn > 0`, which every view clears.
+- `wave-reduced-motion` reports frames identical, `wave-animating` reports frames differ. Both
+  as required, which is what makes a silently failing shader a FAIL from now on.
+
+`rm s1-animation.patch` was not run, for the reason recorded under item 1.
+
+The per-frame cost table above was measured on the review side and was not re-measured here;
+this run re-proves correctness, not the performance numbers. The four "Needs eyes" items stay
+open for the preview.
+
 ## Item 3: data out of git, part 1: the lock (`s1-data.patch`)
 
 Finding 8. `public/data/` held 134.5 MiB in git. Every data rebuild added another copy to the
