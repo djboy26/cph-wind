@@ -24,13 +24,17 @@ const OPEN_METEO = "https://api.open-meteo.com/v1/forecast";
 const MET_NO = "https://api.met.no/weatherapi/locationforecast/2.0/compact";
 const MET_NO_UA = "cph-wind-validation/1.0 (https://github.com/djboy26/cph-wind; sourabhrj26@gmail.com)";
 const METAR_URL = "https://aviationweather.gov/api/data/metar?ids=EKCH&format=json";
-const DMI_BASE = "https://dmigw.govcloud.dk/v2/metObs/collections/observation/items";
+// DMI retired the dmigw.govcloud.dk gateway in September 2026 (DNS no longer resolves);
+// the same v2 metObs API answers on opendataapi.dmi.dk, keyless.
+const DMI_BASE = "https://opendataapi.dmi.dk/v2/metObs/collections/observation/items";
+// Queried by station, not by bbox: a bbox query with a row limit can silently drop a
+// station once DMI adds observations in the box (06181 vanished from the log on
+// 2026-08-20 while it kept reporting).
+const DMI_STATIONS = ["06180", "06181"]; // Copenhagen Airport (Kastrup), Jægersborg
 const DMI_KEY = process.env.DMI_API_KEY;
 const LOG_PATH = "validation-log.ndjson";
 
 const KT_TO_MS = 0.514444;
-// Greater-Copenhagen bbox (lon,lat order, OGC): minLon,minLat,maxLon,maxLat
-const CPH_BBOX = [12.40, 55.55, 12.75, 55.80];
 const MAX_TIME_SKEW_MIN = 40; // obs/model must be within this to be comparable
 
 // ---- Provisional cyclist wind-speed scale (10 m equivalent, m/s) ----
@@ -116,9 +120,9 @@ async function fetchMetar() {
   }
 }
 
-function dmiUrl(parameterId, fromISO, toISO) {
+function dmiUrl(stationId, parameterId, fromISO, toISO) {
   const p = new URLSearchParams({
-    parameterId, bbox: CPH_BBOX.join(","), datetime: `${fromISO}/${toISO}`, limit: "1000",
+    stationId, parameterId, datetime: `${fromISO}/${toISO}`, limit: "100",
   });
   if (DMI_KEY) p.set("api-key", DMI_KEY);
   return `${DMI_BASE}?${p}`;
@@ -144,12 +148,17 @@ async function fetchDmi() {
   const fromISO = from.toISOString().replace(/\.\d+Z$/, "Z");
   const toISO = to.toISOString().replace(/\.\d+Z$/, "Z");
   try {
-    const [spd, dir] = await Promise.all([
-      getJson(dmiUrl("wind_speed", fromISO, toISO)),
-      getJson(dmiUrl("wind_dir", fromISO, toISO)),
-    ]);
-    const speeds = latestPerStation(spd.features || []);
-    const dirs = latestPerStation(dir.features || []);
+    // One station failing must not drop the other: settle each request on its own.
+    const results = await Promise.allSettled(DMI_STATIONS.flatMap((id) => [
+      getJson(dmiUrl(id, "wind_speed", fromISO, toISO)),
+      getJson(dmiUrl(id, "wind_dir", fromISO, toISO)),
+    ]));
+    const features = (param) => results
+      .filter((r, k) => r.status === "fulfilled" && (k % 2 === 0) === (param === "wind_speed"))
+      .flatMap((r) => r.value.features || []);
+    for (const r of results) if (r.status === "rejected") console.warn("  DMI request failed:", r.reason?.message);
+    const speeds = latestPerStation(features("wind_speed"));
+    const dirs = latestPerStation(features("wind_dir"));
     const rows = [];
     for (const [id, s] of speeds) {
       const d = dirs.get(id);

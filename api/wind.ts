@@ -31,6 +31,19 @@ interface ProxyResponse {
 const first = (v: string | string[] | undefined): string | undefined =>
   Array.isArray(v) ? v[0] : v;
 
+// The proxy answers only for places the app serves. Without this it is a free,
+// anonymous MET Norway relay for the whole planet under our User-Agent, and abuse
+// would get that User-Agent throttled or blocked for every rider. Widen this to the
+// world index's city boxes when Milestone 2 adds cities.
+export const SERVICE_AREA = { minLat: 55.3, maxLat: 56.1, minLon: 12.0, maxLon: 13.1 } as const;
+
+/** Round to 2 decimals (~1.1 km): finer than MET's 2.5 km grid, coarse enough to share cache entries. */
+export const roundCoord = (v: number): string => v.toFixed(2);
+
+export function inServiceArea(lat: number, lon: number): boolean {
+  return lat >= SERVICE_AREA.minLat && lat <= SERVICE_AREA.maxLat && lon >= SERVICE_AREA.minLon && lon <= SERVICE_AREA.maxLon;
+}
+
 export default async function handler(req: ProxyRequest, res: ProxyResponse): Promise<void> {
   const lat = Number(first(req.query.lat));
   const lon = Number(first(req.query.lon));
@@ -38,8 +51,13 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
     res.status(400).json({ error: 'Query params lat and lon are required numbers.' });
     return;
   }
+  if (!inServiceArea(lat, lon)) {
+    res.setHeader('Cache-Control', 'public, s-maxage=86400');
+    res.status(400).json({ error: 'Outside the area this app serves.' });
+    return;
+  }
 
-  const url = `${MET_URL}?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`;
+  const url = `${MET_URL}?lat=${roundCoord(lat)}&lon=${roundCoord(lon)}`;
   try {
     const upstream = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
     if (!upstream.ok) {
@@ -52,7 +70,9 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
     const ttl = expires ? Math.floor((Date.parse(expires) - Date.now()) / 1000) : 600;
     const sMaxAge = Number.isFinite(ttl) && ttl > 60 ? ttl : 600;
     res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Cache-Control', `public, s-maxage=${sMaxAge}, stale-while-revalidate=600`);
+    // stale-if-error: during a MET outage the CDN keeps serving the last forecast for an
+    // hour instead of an error card.
+    res.setHeader('Cache-Control', `public, s-maxage=${sMaxAge}, stale-while-revalidate=600, stale-if-error=3600`);
     res.send(body);
   } catch (err) {
     res.status(502).json({ error: `Wind proxy failed: ${(err as Error).message}` });

@@ -5,7 +5,7 @@
 
 import type { CSSProperties } from "react";
 
-// Inter (loaded in index.html) with a sturdy system fallback.
+// Inter (self-hosted via @fontsource/inter, imported in main.tsx) with a sturdy system fallback.
 export const FONT = "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
 // Calm Nordic ink against the warm "Copenhagen Morning" map. Surfaces are frosted
