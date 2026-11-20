@@ -933,6 +933,17 @@ function MapApp() {
   const showDataError = dataError && stillLoading;
   const activeTip = pinned ?? hover;
 
+  // The forecast panel's height, for what sits above it on a phone (see legendStyle).
+  const sliderRef = useRef<HTMLDivElement | null>(null);
+  const [sliderH, setSliderH] = useState(132);
+  useEffect(() => {
+    const el = sliderRef.current;
+    if (!el || !isMobile || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setSliderH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isMobile, stillLoading, forecast.length, routing]);
+
   const openAbout = useCallback(() => setAboutOpen(true), []);
   const closeAbout = useCallback(() => setAboutOpen(false), []);
 
@@ -968,11 +979,15 @@ function MapApp() {
   // hidden while a route sheet owns the bottom on mobile.
   const showSlider = !stillLoading && forecast.length > 1 && !(routing && isMobile);
 
+  // Phone: the legend pill and the credit sit 8 px above the forecast panel, measured, not
+  // assumed: the panel grew a row in sprint 2 and covered them, and its numbers can wrap
+  // onto another line on a narrow phone.
+  const aboveSlider = 10 + sliderH + 8;
   const legendStyle: React.CSSProperties = isMobile
     ? {
         position: "absolute",
         // Sit clear above the (full-width) forecast strip when it's shown.
-        bottom: pinned ? 200 : `calc(env(safe-area-inset-bottom) + ${showSlider ? 118 : 10}px)`,
+        bottom: pinned ? 200 : `calc(env(safe-area-inset-bottom) + ${showSlider ? aboveSlider : 10}px)`,
         left: "calc(env(safe-area-inset-left) + 10px)",
         zIndex: 20,
       }
@@ -985,8 +1000,8 @@ function MapApp() {
   const attributionStyle = useMemo<React.CSSProperties>(() => (isMobile
     ? routing
       ? { position: "absolute", top: "calc(env(safe-area-inset-top) + 62px)", right: "calc(env(safe-area-inset-right) + 10px)", zIndex: 19 }
-      : { position: "absolute", bottom: `calc(env(safe-area-inset-bottom) + ${showSlider ? 122 : 14}px)`, right: "calc(env(safe-area-inset-right) + 10px)", zIndex: 19 }
-    : { position: "absolute", bottom: 6, right: 16, zIndex: 19 }), [isMobile, routing, showSlider]);
+      : { position: "absolute", bottom: `calc(env(safe-area-inset-bottom) + ${showSlider ? aboveSlider + 4 : 14}px)`, right: "calc(env(safe-area-inset-right) + 10px)", zIndex: 19 }
+    : { position: "absolute", bottom: 6, right: 16, zIndex: 19 }), [isMobile, routing, showSlider, aboveSlider]);
 
   const sliderStyle: React.CSSProperties = isMobile
     ? {
@@ -1090,7 +1105,7 @@ function MapApp() {
       )}
 
       {showSlider && (
-        <div className="ui-up" style={sliderStyle}>
+        <div ref={sliderRef} className="ui-up" style={sliderStyle}>
           <TimeSlider
             steps={forecast}
             index={forecastIdx}
