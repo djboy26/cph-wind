@@ -1,19 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { WebMercatorViewport } from '@deck.gl/core';
-import { boxForBounds, boxKey, snapDegFor, PAD, SNAP_DEG, MAX_SPAN_DEG } from './viewBox';
+import { boxForBounds, boxKey, snapDegFor, PAD, SNAP_DEG, MAX_SPAN_DEG, MAX_CELL_DEG } from './viewBox';
 
 const HCA = { lon: 12.5687, lat: 55.6754 };
 const bounds = (lon: number, lat: number, zoom: number, w = 1440, h = 900, pitch = 0) =>
   new WebMercatorViewport({ width: w, height: h, longitude: lon, latitude: lat, zoom, pitch }).getBounds() as [number, number, number, number];
 
 describe('snapDegFor', () => {
-  it('is a power-of-two multiple of SNAP_DEG near a quarter of the view, never below SNAP_DEG', () => {
+  it('is a power-of-two multiple of SNAP_DEG near a quarter of the view, from SNAP_DEG to MAX_CELL_DEG', () => {
     for (const span of [0.001, 0.005, 0.02, 0.05, 0.0874, 0.12]) {
       const c = snapDegFor(span);
       expect(Number.isInteger(Math.log2(c / SNAP_DEG))).toBe(true);
       expect(c).toBeGreaterThanOrEqual(SNAP_DEG);
-      if (c > SNAP_DEG) expect(c / (span * 0.25)).toBeGreaterThan(Math.SQRT1_2 - 1e-9);
-      if (c > SNAP_DEG) expect(c / (span * 0.25)).toBeLessThan(Math.SQRT2 + 1e-9);
+      expect(c).toBeLessThanOrEqual(MAX_CELL_DEG);
+      if (c > SNAP_DEG && c < MAX_CELL_DEG) {
+        expect(c / (span * 0.25)).toBeGreaterThan(Math.SQRT1_2 - 1e-9);
+        expect(c / (span * 0.25)).toBeLessThan(Math.SQRT2 + 1e-9);
+      }
     }
   });
 });
@@ -47,9 +50,20 @@ describe('boxForBounds', () => {
   it('is about 1.5 views across at the city view, as the box was before sprint 2', () => {
     const b = bounds(HCA.lon, HCA.lat, 13.5);
     const [w, s, e, n] = boxForBounds(b);
-    expect((e - w)).toBeLessThanOrEqual(MAX_SPAN_DEG + 1e-9);
+    expect((e - w)).toBeLessThanOrEqual(MAX_SPAN_DEG + snapDegFor(MAX_SPAN_DEG) + 1e-9);
     expect((n - s) / (b[3] - b[1])).toBeGreaterThan(1.4);
     expect((n - s) / (b[3] - b[1])).toBeLessThan(1.8);
+  });
+
+  it('always holds the MAX_SPAN_DEG window centred on a view wider than that (a pitched city view)', () => {
+    for (let k = 0; k < 60; k++) {
+      const b = bounds(HCA.lon + k * 0.0011, HCA.lat + k * 0.0003, 13.5, 1440, 900, 40);
+      expect(b[2] - b[0]).toBeGreaterThan(MAX_SPAN_DEG); // the case under test
+      const [w, , e] = boxForBounds(b);
+      const c = (b[0] + b[2]) / 2;
+      expect(w).toBeLessThanOrEqual(c - MAX_SPAN_DEG / 2 + 1e-9);
+      expect(e).toBeGreaterThanOrEqual(c + MAX_SPAN_DEG / 2 - 1e-9);
+    }
   });
 
   it('changes about every quarter screen of pan: at most 6 boxes over one screen width, at every zoom', () => {

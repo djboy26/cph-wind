@@ -16,21 +16,29 @@
 export const SNAP_DEG = 0.004;
 /** The margin on each side, as a share of the view. */
 export const PAD = 0.125;
-/** No box is wider than this (a steep pitch stretches the visible area toward the horizon). */
+/**
+ * The widest view the field covers in full (a steep pitch stretches the visible area
+ * toward the horizon; past this the outer edges go without arrows). The box itself is
+ * at most this plus one snap cell, so it always holds the MAX_SPAN_DEG window centred on
+ * the view, wherever its own snapped centre falls.
+ */
 export const MAX_SPAN_DEG = 0.12;
 /** Half-sizes are whole multiples of this, so the box is never more than 0.001° looser than needed. */
 const HALF_STEP_DEG = SNAP_DEG / 4;
 
-/** The snap cell for a view this many degrees across: the power-of-two multiple of SNAP_DEG nearest a quarter of it. */
+/** The largest snap cell. A bigger one would widen the box at the desktop city view (see MAX_SPAN_DEG) more than it saves. */
+export const MAX_CELL_DEG = 4 * SNAP_DEG;
+
+/** The snap cell for a view this many degrees across: the power-of-two multiple of SNAP_DEG nearest a quarter of it, at most MAX_CELL_DEG. */
 export function snapDegFor(spanDeg: number): number {
-  return SNAP_DEG * 2 ** Math.max(0, Math.round(Math.log2((spanDeg * 0.25) / SNAP_DEG)));
+  return Math.min(MAX_CELL_DEG, SNAP_DEG * 2 ** Math.max(0, Math.round(Math.log2((spanDeg * 0.25) / SNAP_DEG))));
 }
 
 function axis(lo: number, hi: number): [number, number] {
   const span = Math.min(hi - lo, MAX_SPAN_DEG);
   const cell = snapDegFor(span);
   const mid = Math.round((lo + hi) / 2 / cell) * cell;
-  const half = Math.min(MAX_SPAN_DEG / 2, Math.ceil((span / 2 + span * PAD + cell / 2) / HALF_STEP_DEG - 1e-9) * HALF_STEP_DEG);
+  const half = Math.min(MAX_SPAN_DEG / 2 + cell / 2, Math.ceil((span / 2 + span * PAD + cell / 2) / HALF_STEP_DEG - 1e-9) * HALF_STEP_DEG);
   return [mid - half, mid + half];
 }
 
