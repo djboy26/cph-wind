@@ -183,7 +183,9 @@ export const LOOKS: Record<LookId, Look> = {
     roadBand: [255, 255, 255, 245],
     roadCasing: [212, 208, 200, 255],
     buildingFill: [233, 231, 225, 242],
-    buildingMaterial: { ambient: 0.8, diffuse: 0.45, shininess: 4, specularColor: [40, 40, 40] },
+    // Roof light = ambient + diffuse ≈ 0.9 of the fill: Morning's 0.72 + 0.55 = 1.27
+    // clips its pale roofs to white when the map is tilted.
+    buildingMaterial: { ambient: 0.5, diffuse: 0.4, shininess: 4, specularColor: [40, 40, 40] },
     bikeLane: [70, 118, 98, 190],
     bikeLaneOnRoad: [70, 118, 98, 120],
   },
@@ -223,7 +225,7 @@ export const LOOKS: Record<LookId, Look> = {
     roadBand: [255, 252, 245, 240],
     roadCasing: [233, 216, 189, 255],
     buildingFill: [240, 225, 203, 242],
-    buildingMaterial: { ambient: 0.72, diffuse: 0.55, shininess: 8, specularColor: [64, 56, 46] },
+    buildingMaterial: { ambient: 0.52, diffuse: 0.42, shininess: 8, specularColor: [64, 56, 46] },
     bikeLane: [46, 140, 96, 205],
     bikeLaneOnRoad: [46, 140, 96, 125],
   },
