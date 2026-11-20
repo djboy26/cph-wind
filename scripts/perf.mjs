@@ -60,6 +60,10 @@ async function open(hash, { phone = false } = {}) {
     if (((await page.evaluate(() => window.__cphwind?.arrows ?? 0)) > 0)) break;
     await page.waitForTimeout(500);
   }
+  for (let t = 0; t < 120; t++) { // and the building chunks (probe.buildingsPending; older builds lack it)
+    if (((await page.evaluate(() => window.__cphwind?.buildingsPending ?? 0)) === 0)) break;
+    await page.waitForTimeout(250);
+  }
   await page.waitForTimeout(2000);
   renderer ??= await page.evaluate(() => {
     const gl = document.createElement("canvas").getContext("webgl2");

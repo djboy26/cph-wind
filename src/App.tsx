@@ -731,23 +731,6 @@ function MapApp() {
     ];
   }, [visibleSegments, showRoadBand]);
 
-  // A read-only probe for the screenshot harness (scripts/shots.mjs), so a run can
-  // assert "arrows were drawn at this view" instead of eyeballing a PNG. `arrows` counts
-  // the field the CPU built; `drawnArrows()` counts the arrows the GPU actually drew, read
-  // back from deck.gl's picking buffer, so an arrow shader that fails to compile reads 0.
-  // Nothing in the app reads it.
-  useEffect(() => {
-    (window as unknown as { __cphwind?: unknown }).__cphwind = {
-      zoom: zoomQ,
-      arrows: flowLines.length,
-      drawnArrows: () =>
-        deckRef.current?.pickObjects({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight, layerIds: ["wind-flow-arrows"] }).length ?? null,
-      tiles: Object.keys(tileCache).length,
-      windMs: activeWind?.speedMs ?? null,
-      canyonEdges,
-    };
-  }, [zoomQ, flowLines, tileCache, activeWind, canyonEdges]);
-
   // Only extrude the buildings near the view — 220k city-wide footprints would choke
   // the GPU: the 0.02° chunks under the padded box (buildings/chunks.ts). The worker
   // parses the file and answers per chunk; each chunk keeps its own layer, so a pan
@@ -780,6 +763,27 @@ function MapApp() {
     }
   }, [buildingKeys, buildingChunks]);
   useEffect(() => () => buildingsRef.current?.terminate(), []);
+
+  // A read-only probe for the screenshot harness (scripts/shots.mjs), so a run can
+  // assert "arrows were drawn at this view" instead of eyeballing a PNG. `arrows` counts
+  // the field the CPU built; `drawnArrows()` counts the arrows the GPU actually drew, read
+  // back from deck.gl's picking buffer, so an arrow shader that fails to compile reads 0.
+  // `buildingsPending` counts the building chunks wanted but not in yet: the worker parses
+  // while the page sits still, so the harness waits for 0 before it judges the map at rest.
+  // Nothing in the app reads it.
+  useEffect(() => {
+    (window as unknown as { __cphwind?: unknown }).__cphwind = {
+      zoom: zoomQ,
+      arrows: flowLines.length,
+      drawnArrows: () =>
+        deckRef.current?.pickObjects({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight, layerIds: ["wind-flow-arrows"] }).length ?? null,
+      tiles: Object.keys(tileCache).length,
+      windMs: activeWind?.speedMs ?? null,
+      canyonEdges,
+      buildingChunks: buildingKeys.filter((k) => buildingChunks.has(k)).length,
+      buildingsPending: buildingKeys.filter((k) => !buildingChunks.has(k)).length,
+    };
+  }, [zoomQ, flowLines, tileCache, activeWind, canyonEdges, buildingKeys, buildingChunks]);
 
   const onViewStateChange = useCallback(({ viewState: vs }: { viewState: Record<string, unknown> }) => {
     setViewState(constrainView(vs as typeof viewState));

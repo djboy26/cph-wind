@@ -89,6 +89,21 @@ async function openPage(wind, vp, mobile, { onboarded = true, reducedMotion = fa
 const probe = (page) => page.evaluate(() => window.__cphwind ?? null);
 
 /**
+ * Wait until every building chunk the view wants is in (probe.buildingsPending, 0 on a
+ * phone or below zoom 14), at most `ms`. The buildings are parsed in a worker while the
+ * page sits still, so a fixed wait or a "two equal frames" test can end before they land.
+ */
+async function buildingsIn(page, ms = 30_000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    const p = await probe(page);
+    if (p && (p.buildingsPending ?? 0) === 0) return true;
+    await page.waitForTimeout(250);
+  }
+  return false;
+}
+
+/**
  * Wait until the basemap has had nothing in flight for 1.5 s (style, tiles, glyphs,
  * sprites), at most `ms`. A fixed wait was not enough on a cold tile cache: the first
  * city shot of sprint 2 came out with no basemap at all after 5 requests.
@@ -144,8 +159,9 @@ for (const wind of WINDS) {
     const { ctx, page, basemap } = await openPage(wind, v.vp, v.mobile);
     await page.goto(`${base}/#${v.hash}`, { waitUntil: "networkidle", timeout: 90_000 });
     const p = await waitForArrows(page, v.arrows);
+    await buildingsIn(page);
     await basemapSettled(basemap);
-    await page.waitForTimeout(2500); // the last tiles drawn, and the building chunks in
+    await page.waitForTimeout(1500); // the last tiles and chunks drawn
     await snap(page, join(outDir, `${v.name}-${wind.tag}.png`));
     record(`${v.name}-${wind.tag}`, p, basemap, v.arrows, await drawnArrows(page));
     await ctx.close();
@@ -172,6 +188,9 @@ for (const reduced of [true, false]) {
   const { ctx, page, basemap } = await openPage(WINDS[0], [1440, 900], false, { reducedMotion: reduced });
   await page.goto(`${base}/#z=17.5&lat=${HCA.lat}&lon=${HCA.lon}&pitch=0`, { waitUntil: "networkidle", timeout: 90_000 });
   await waitForArrows(page, 200);
+  // Everything that streams in must be in first, or "at rest" can mean "still waiting".
+  await buildingsIn(page);
+  await basemapSettled(basemap);
   let a;
   if (reduced) {
     const t0 = Date.now();
