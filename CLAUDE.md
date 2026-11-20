@@ -17,6 +17,7 @@ a step there only when the sprint plan points to it.
 | `npm test` (or `npm run test:run`) — one-shot tests | |
 | `npm run build` — `tsc -b && vite build` | |
 | `npm run dev` | |
+| `npm run data:pull` — the locked map data, after a fresh clone (`build` and `dev` run it first anyway) | |
 
 `npm run test:watch` blocks indefinitely waiting for file changes. Never call it from an agent.
 Node 24 everywhere (`.nvmrc`, `engines`, CI).
@@ -49,14 +50,29 @@ was fixed by Step 2a on 2026-09-03 (`docs/history/PLAN-M1.md`).
 
 ## Data pipeline
 
-Regenerating map data hits Overpass hard and takes minutes. Do not run it unless a step says to.
+The map data is pinned by `data.lock.json`: a version plus the size and SHA-256 of every file.
+The files live in Cloudflare R2 under `<version>/<path>`. `npm run build`, `npm run dev` and CI
+fetch them with `npm run data:pull`; `npm test` stops at once if `public/data/` does not match the
+lock. Until the Sprint 1 cutover (`plans/sprint-1.md`) the files are also still committed.
 
-```
-npm run data:rebuild    # fetch-osm -> fetch-buildings -> compute-cross-sections -> tile-segments -> canyon-by-way -> slim-buildings
-npm run data:validate
-```
+| command | what it does |
+|---|---|
+| `npm run data:pull` | fetch the locked app data into `public/data/`, only what is missing; never overwrites a local file that differs unless `-- --force` |
+| `npm run data:check` | verify `public/data/` against the lock, offline |
+| `npm run data:rebuild` | regenerate everything from Overpass. Slow and hits Overpass hard: do not run it unless a step says to |
+| `npm run data:validate` | sanity-check the cross-sections |
+| `npm run data:lock` | record locally rebuilt data in the lock, no upload |
+| `npm run data:publish` | upload the local data to R2 and record its version; reads credentials from `.r2.local` (never commit it) |
 
-Generated artefacts in `public/data/` are committed, except `cph-segments.json`, which is an intermediate that `tile-segments` and the validator read; regenerate it locally with `node scripts/compute-cross-sections.mjs`. `segtiles/` is the tiled form the app loads. `canyon-by-way.json` is the per-way canyon table the router joins on (Step 2b), rebuilt from the tiles by `npm run data:canyon`.
+After a rebuild: `data:rebuild`, `data:validate`, `data:publish`, then commit `data.lock.json`
+together with the code that needs that data.
+
+`public/data/` is exactly what the browser fetches, all through `dataUrl()` in `src/data/base.ts`.
+`segtiles/` is the tiled street data the app loads; `canyon-by-way.json` is the per-way canyon
+table the router joins on (Step 2b), rebuilt from the tiles by `npm run data:canyon`.
+`data/raw/` holds pipeline files that are never deployed: `cph-buildings.json` (published with
+each version so a build can be reproduced) and `cph-segments.json` (an intermediate that
+`tile-segments` and the validator read; regenerate it with `node scripts/compute-cross-sections.mjs`).
 
 ## Rendering: `npm run shots`, and nothing else
 

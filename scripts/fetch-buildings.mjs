@@ -1,5 +1,6 @@
 // scripts/fetch-buildings.mjs
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import osmtogeojson from "osmtogeojson";
 
 const BBOX = "55.58,12.40,55.78,12.75";
@@ -16,7 +17,7 @@ out skel qt;
 `;
 
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
-const OUTPUT_PATH = "public/data/cph-buildings.json";
+const OUTPUT_PATH = "data/raw/cph-buildings.json"; // pipeline input; published with the data, never deployed
 
 const DEFAULT_LEVEL_HEIGHT_M = 3.0;
 const DEFAULT_HEIGHT_BY_TYPE = {
@@ -107,6 +108,7 @@ async function main() {
   });
 
   console.log(`Height sources: explicit=${fromHeight}, levels=${fromLevels}, type-default=${fromType}`);
+  await mkdir(dirname(OUTPUT_PATH), { recursive: true });
   await writeFile(OUTPUT_PATH, JSON.stringify(geojson));
   const sizeMB = (JSON.stringify(geojson).length / 1024 / 1024).toFixed(2);
   console.log(`Wrote ${geojson.features.length} buildings to ${OUTPUT_PATH} (${sizeMB} MB)`);

@@ -4,9 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/data-pull.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/data-pull.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "pretest": "node scripts/data-pull.mjs --check",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:run": "vitest run",
@@ -15,6 +18,10 @@
     "data:rebuild": "node scripts/fetch-osm.mjs && node scripts/fetch-buildings.mjs && node scripts/compute-cross-sections.mjs && node scripts/tile-segments.mjs && node scripts/canyon-by-way.mjs && node scripts/slim-buildings.mjs",
     "data:validate": "node scripts/validate-cross-sections.mjs",
     "data:canyon": "node scripts/canyon-by-way.mjs",
+    "data:pull": "node scripts/data-pull.mjs",
+    "data:check": "node scripts/data-pull.mjs --check",
+    "data:lock": "node scripts/data-publish.mjs --lock-only",
+    "data:publish": "node --env-file-if-exists=.r2.local scripts/data-publish.mjs",
     "shots": "node scripts/shots.mjs"
   },
   "dependencies": {

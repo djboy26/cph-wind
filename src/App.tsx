@@ -12,6 +12,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import type { Feature, FeatureCollection, LineString } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
+import { dataUrl } from "./data/base";
 import { useReducedMotion } from "./hooks/useReducedMotion";
 import { useRedrawLoop } from "./hooks/useRedrawLoop";
 import { reverseGeocode } from "./api/geocode";
@@ -555,7 +556,7 @@ function MapApp() {
   // tiles stream in per viewport (see the tile-loading effect below).
   useEffect(() => {
     let cancelled = false;
-    fetch("/data/segtiles/index.json")
+    fetch(dataUrl("segtiles/index.json"))
       .then((r) => { if (!r.ok) throw new Error(`Tile index ${r.status}`); return r.json(); })
       .then((m) => {
         if (!cancelled) setTileManifest({ tileDeg: m.tileDeg, minLon: m.minLon, minLat: m.minLat, tiles: new Set<string>(m.tiles) });
@@ -570,11 +571,11 @@ function MapApp() {
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      fetch("/data/cph-roads.json")
+      fetch(dataUrl("cph-roads.json"))
         .then((r) => { if (!r.ok) throw new Error(`Roads ${r.status}`); return r.json(); })
         .then((r) => { if (!cancelled) setRoads(r); })
         .catch((e) => { if (!cancelled) console.warn("Roads failed to load:", e); });
-      fetch("/data/canyon-by-way.json")
+      fetch(dataUrl("canyon-by-way.json"))
         .then((r) => { if (!r.ok) throw new Error(`Canyon table ${r.status}`); return r.json(); })
         .then((t) => { if (!cancelled) setCanyonTable(t); })
         .catch((e) => { if (!cancelled) { console.warn("Canyon table failed to load; routing on the flat model:", e); setCanyonTable(false); } });
@@ -599,7 +600,7 @@ function MapApp() {
   useEffect(() => {
     if (!wantBuildings || buildingsReq.current) return;
     buildingsReq.current = true;
-    fetch("/data/cph-buildings-slim.json")
+    fetch(dataUrl("cph-buildings-slim.json"))
       .then((r) => { if (!r.ok) throw new Error(`Buildings ${r.status}`); return r.json(); })
       .then((b: BuildingRow[]) => setBuildings(b))
       .catch((e) => { console.warn("3D buildings failed to load:", e); buildingsReq.current = false; });
@@ -662,7 +663,7 @@ function MapApp() {
       if (!tileManifest.tiles.has(key)) continue;
       if (tileCache[key] || tileInflightRef.current.has(key)) continue;
       tileInflightRef.current.add(key);
-      fetch(`/data/segtiles/${key}.json`)
+      fetch(dataUrl(`segtiles/${key}.json`))
         .then((r) => { if (!r.ok) throw new Error(`Tile ${key} ${r.status}`); return r.json(); })
         .then((arr: SegTuple[]) => {
           setTileCache((prev) => ({ ...prev, [key]: arr.map(decodeSeg) }));

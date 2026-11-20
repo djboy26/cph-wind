@@ -1,11 +1,12 @@
 // scripts/compute-cross-sections.mjs
 // Derives street cross-sections from building polygon geometry via perpendicular ray-casts.
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import Flatbush from "flatbush";
 
-const BUILDINGS_PATH = "public/data/cph-buildings.json";
+const BUILDINGS_PATH = "data/raw/cph-buildings.json";
 const ROADS_PATH = "public/data/cph-roads.json";
-const OUTPUT_PATH = "public/data/cph-segments.json";
+const OUTPUT_PATH = "data/raw/cph-segments.json"; // intermediate: tile-segments and the validator read it
 
 const MAX_SEARCH_M = 40;
 // Every way is resampled into pieces of about STEP_M along its centreline before a
@@ -354,6 +355,7 @@ function resample(coords) {
   console.log(`  Moderate (0.3-0.7):    ${buckets.moderate}`);
   console.log(`  Deep (lambda>0.7):     ${buckets.deep}`);
 
+  await mkdir(dirname(OUTPUT_PATH), { recursive: true });
   await writeFile(OUTPUT_PATH, JSON.stringify(segments));
   const sizeMB = (JSON.stringify(segments).length / 1024 / 1024).toFixed(2);
   console.log(`Wrote ${OUTPUT_PATH} (${sizeMB} MB)`);

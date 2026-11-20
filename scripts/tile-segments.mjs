@@ -1,5 +1,5 @@
 // scripts/tile-segments.mjs
-// Splits the monolithic public/data/cph-segments.json (~21.7 MB, all 59.7k streets)
+// Splits the monolithic data/raw/cph-segments.json (~21.7 MB, all 59.7k streets)
 // into a spatial grid of small, lean tiles so the app downloads only the viewport.
 //
 // Each segment is stored as a compact tuple (derivable/unused fields dropped):
@@ -11,7 +11,7 @@
 
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 
-const SRC = "public/data/cph-segments.json";
+const SRC = "data/raw/cph-segments.json";
 const OUT_DIR = "public/data/segtiles";
 // Greater-Copenhagen origin (matches the app's GCPH lock) + tile size in degrees.
 const MIN_LON = 12.34;

@@ -5,7 +5,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 
-const SRC = "public/data/cph-buildings.json";
+const SRC = "data/raw/cph-buildings.json";
 const OUT = "public/data/cph-buildings-slim.json";
 const DEFAULT_HEIGHT_M = 9;
 
