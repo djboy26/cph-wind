@@ -88,6 +88,7 @@ const BUILDING_FILL: [number, number, number, number] = [...BUILDING_RGB, 244];
 const BUILDING_MATERIAL = { ambient: 0.72, diffuse: 0.55, shininess: 8, specularColor: [60, 58, 52] as [number, number, number] };
 const buildingRing = (d: BuildingRow) => d[1];
 const buildingHeight = (d: BuildingRow) => d[0];
+const NO_BUILDINGS: BuildingRow[] = [];
 
 // Recolour the light basemap into the Daylight palette. OpenMapTiles styles use
 // well-named layers (water, park, landcover_wood, building, boundary_*, highway_*,
@@ -351,6 +352,7 @@ function MapApp() {
   const [buildingChunks, setBuildingChunks] = useState<ReadonlyMap<string, BuildingRow[]>>(() => new Map());
   const buildingsRef = useRef<BuildingsClient | null>(null);
   const buildingsInflight = useRef<Set<string>>(new Set());
+  const [chunkQueue, setChunkQueue] = useState<readonly (readonly [string, BuildingRow[]])[]>([]);
   const [dataError, setDataError] = useState<Error | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
   const [pinned, setPinned] = useState<HoverState | null>(null);
@@ -750,10 +752,8 @@ function MapApp() {
       if (buildingChunks.has(key) || buildingsInflight.current.has(key)) continue;
       buildingsInflight.current.add(key);
       client.chunk(key).then(
-        (rows) => {
-          buildingsInflight.current.delete(key);
-          setBuildingChunks((prev) => new Map(prev).set(key, rows));
-        },
+        (rows) => { setChunkQueue((q) => [...q, [key, rows]]); }, // still "in flight" until it joins the map
+
         (e) => {
           buildingsInflight.current.delete(key);
           // The file did not load: drop this worker; the next zoom past 14 starts a new one.
@@ -763,6 +763,34 @@ function MapApp() {
     }
   }, [buildingKeys, buildingChunks]);
   useEffect(() => () => buildingsRef.current?.terminate(), []);
+
+  // Chunks join the map one per frame. The worker answers a whole view's chunks at once
+  // (15 or so at zoom 14), and extruding them in one go was one long freeze.
+  useEffect(() => {
+    if (chunkQueue.length === 0) return;
+    const id = requestAnimationFrame(() => {
+      const [key, rows] = chunkQueue[0];
+      buildingsInflight.current.delete(key);
+      setBuildingChunks((prev) => new Map(prev).set(key, rows));
+      setChunkQueue((q) => q.slice(1));
+    });
+    return () => cancelAnimationFrame(id);
+  }, [chunkQueue]);
+
+  // Compile the 3D-building shaders while the map sits idle after it first draws, not
+  // in the middle of the first zoom past 14: an empty layer with the chunks' settings
+  // (desktop only; phones draw no buildings).
+  const [warmBuildings, setWarmBuildings] = useState(false);
+  useEffect(() => {
+    if (isMobile || warmBuildings || !tileManifest || Object.keys(tileCache).length === 0) return;
+    const win = window as unknown as {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const warm = () => setWarmBuildings(true);
+    const id = win.requestIdleCallback ? win.requestIdleCallback(warm, { timeout: 4000 }) : window.setTimeout(warm, 2500);
+    return () => { if (win.requestIdleCallback && win.cancelIdleCallback) win.cancelIdleCallback(id); else window.clearTimeout(id); };
+  }, [isMobile, warmBuildings, tileManifest, tileCache]);
 
   // A read-only probe for the screenshot harness (scripts/shots.mjs), so a run can
   // assert "arrows were drawn at this view" instead of eyeballing a PNG. `arrows` counts
@@ -792,27 +820,27 @@ function MapApp() {
   // 3D building extrusions sit at the bottom of the stack, one layer per chunk. A
   // chunk's rows keep their identity, so deck.gl extrudes a chunk once and reuses it
   // while it stays near the view; only a chunk that arrives is new work.
-  const buildingLayers = useMemo(
-    () => buildingKeys.flatMap((key) => {
+  const buildingLayers = useMemo(() => {
+    const chunk = (id: string, data: BuildingRow[]) =>
+      new PolygonLayer<BuildingRow>({
+        id,
+        data,
+        extruded: true,
+        getPolygon: buildingRing,
+        getElevation: buildingHeight,
+        getFillColor: BUILDING_FILL,
+        stroked: false,
+        // Matte, warmly-lit ivory — soft daylight shading, no harsh speculars.
+        material: BUILDING_MATERIAL,
+        pickable: false,
+      });
+    const layers: Layer[] = warmBuildings ? [chunk("buildings-warmup", NO_BUILDINGS)] : [];
+    for (const key of buildingKeys) {
       const rows = buildingChunks.get(key);
-      if (!rows || rows.length === 0) return [];
-      return [
-        new PolygonLayer<BuildingRow>({
-          id: `buildings-${key}`,
-          data: rows,
-          extruded: true,
-          getPolygon: buildingRing,
-          getElevation: buildingHeight,
-          getFillColor: BUILDING_FILL,
-          stroked: false,
-          // Matte, warmly-lit ivory — soft daylight shading, no harsh speculars.
-          material: BUILDING_MATERIAL,
-          pickable: false,
-        }),
-      ];
-    }),
-    [buildingKeys, buildingChunks],
-  );
+      if (rows && rows.length > 0) layers.push(chunk(`buildings-${key}`, rows));
+    }
+    return layers;
+  }, [buildingKeys, buildingChunks, warmBuildings]);
 
   // Routes + endpoints draw on TOP of the wind arrows. Also kept off the per-frame
   // path so the route polylines aren't rebuilt while arrows animate.
