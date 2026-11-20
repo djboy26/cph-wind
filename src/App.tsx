@@ -19,6 +19,7 @@ import { reverseGeocode } from "./api/geocode";
 import { arrowDensityForZoom, type RawSegment } from "./layers/buildWindArrows";
 import { offsetAlongBearing, type GeometrySource } from "./math";
 import { arrowSizePx, buildLattice, colourLattice, createFlowLineLayer, pitchM, roadWidthM, type FlowLine } from "./layers/FlowLineLayer";
+import { boxForBounds, boxKey } from "./layers/viewBox";
 import { chunkKeysForBox, type BuildingRow } from "./buildings/chunks";
 import { createBuildingsClient, type BuildingsClient } from "./buildings/client";
 import { rankRoutes, routeMetrics, type RouteOption, type RankCriterion } from "./routing/windRoute";
@@ -232,19 +233,8 @@ class ErrorBoundary extends Component<{ children: ReactNode; silent?: boolean },
   }
 }
 
-// Snap raw bounds to a coarse grid so arrows only rebuild when the view moves a
-// meaningful amount, not on every pan frame. The cell grows with the view: the
-// power-of-two multiple of SNAP_DEG nearest a quarter of the view's width, so a pan
-// rebuilds the field about every quarter screen at any zoom. (A fixed 0.004° cell is
-// 66 px at the desktop city view, where one rebuild is ~30 ms: 15 rebuilds a second.)
-const SNAP_DEG = 0.004;
-function snapDegFor(spanDeg: number): number {
-  return SNAP_DEG * 2 ** Math.max(0, Math.round(Math.log2((spanDeg * 0.25) / SNAP_DEG)));
-}
 // Decoded segment tiles land in one state update at most this often (see the tile effect).
 const TILE_BATCH_MS = 80;
-const BOUNDS_PAD = 0.25;
-const MAX_SPAN_DEG = 0.12;
 // --- Segment tiles (built by scripts/tile-segments.mjs; loaded per viewport) ---
 // Streets are split into a spatial grid so the phone downloads only what's in view
 // (~tens of KB) instead of the whole 21.7 MB city. Each segment is a lean tuple;
@@ -632,8 +622,8 @@ function MapApp() {
   // Quantised so the field rebuilds a few times per zoom level, not per frame.
   const zoomQ = Math.round(zoom * 4) / 4;
 
-  // Padded, snapped viewport box (as a stable string key). Recomputed every frame
-  // but only changes value when the view moves across a snap cell.
+  // The box the field, the tiles and the buildings cover (layers/viewBox.ts), as a stable
+  // string key. Recomputed every frame; changes about every quarter screen of pan.
   const boundsKey = useMemo(() => {
     if (density === "hidden") return null;
     const vp = new WebMercatorViewport({
@@ -645,25 +635,7 @@ function MapApp() {
       pitch: viewState.pitch ?? 0,
       bearing: viewState.bearing ?? 0,
     });
-    let [west, south, east, north] = vp.getBounds();
-    const snap = snapDegFor(Math.min(east - west, MAX_SPAN_DEG));
-    const padX = (east - west) * BOUNDS_PAD;
-    const padY = (north - south) * BOUNDS_PAD;
-    west -= padX; east += padX; south -= padY; north += padY;
-    // Clamp span — a steep pitch can stretch bounds toward the horizon.
-    if (east - west > MAX_SPAN_DEG) {
-      const cx = (east + west) / 2;
-      west = cx - MAX_SPAN_DEG / 2; east = cx + MAX_SPAN_DEG / 2;
-    }
-    if (north - south > MAX_SPAN_DEG) {
-      const cy = (north + south) / 2;
-      south = cy - MAX_SPAN_DEG / 2; north = cy + MAX_SPAN_DEG / 2;
-    }
-    west = Math.floor(west / snap) * snap;
-    south = Math.floor(south / snap) * snap;
-    east = Math.ceil(east / snap) * snap;
-    north = Math.ceil(north / snap) * snap;
-    return `${west.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${north.toFixed(4)}`;
+    return boxKey(boxForBounds(vp.getBounds() as [number, number, number, number]));
   }, [density, windowSize.width, windowSize.height, viewState.longitude, viewState.latitude, viewState.zoom, viewState.pitch, viewState.bearing]);
 
   // Fetch the segment tiles covering the current viewport (skip empty/loaded/in-flight
