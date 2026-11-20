@@ -175,6 +175,16 @@ push of `sprint-1` (deployment `dpl_G2E6S341ZJkVgS3ZC8Zg9pSZQYqF`, CANCELED, com
 Correct by the rule as written, and exactly wrong for D3, which makes the preview the subjective
 gate for anything a person sees.
 
+### Follow-up 2026-11-20 — commit e396aad
+
+The finding above is fixed. `vercel.json` now runs `scripts/vercel-ignore.sh`: on `main` it skips
+a commit that touches only `validation-log.ndjson`, `docs/`, `plans/` or Markdown, exactly as
+before; on any other branch it always builds, so every push to a sprint branch gets a preview
+whatever its tip commit is. A git error (no parent commit in a shallow clone) builds too. Tested
+against six cases: bot-only, plans-only and code commits on `main` (skip, skip, build) and the
+same on a branch (build each time), plus a root commit (build). `.gitattributes` keeps `*.sh` LF
+in the Windows checkout, because Vercel runs it on Linux. `npm run check` 191 in 19, build green.
+
 Worked around for this PR without changing any project setting, by deploying the branch at its
 last code commit, 3fa9eb0 (item 2), where `HEAD^ HEAD` does contain code. A durable fix belongs
 with the reviewer; the obvious candidates are to compare against the deployment's base rather than
@@ -373,6 +383,30 @@ rather than the diagnosis the script took care to write. Vercel and CI build on 
 unaffected.
 
 Over to the reviewer. The fix belongs in `data-pull.mjs` on the review side, not here.
+
+### Completed 2026-11-20 — commit 4d4f17b
+
+The diagnosis above was right. The fix, made on the review side and applied here:
+`data-pull.mjs` and `data-publish.mjs` no longer call `process.exit()` once requests are open.
+The first failure aborts the other workers' requests through one `AbortController`, every
+worker settles (`Promise.allSettled`), and the script ends with `process.exitCode = 1`. The
+S3 client takes the abort signal too. `pull.test.mjs` now preloads a tripwire on `process.exit`
+and asserts it never fires after a download starts, so the Linux suite catches this class of
+bug as well: with the old script, exactly the two tests that crashed here fail on Linux.
+
+On this machine (Windows, Node 24.16.0):
+
+- `npx vitest run scripts/data`: 14 tests in 3 files pass, including both that crashed.
+- `npm run data:check`: `data: 163 files match data.lock.json (version 5d464b01f465, 64.3 MiB).`
+- `npm run check`: lint clean, **191 tests in 19 files pass**. Matches.
+- `npm run build`: first prints `data: 163 files already match data.lock.json (version
+  5d464b01f465, 64.3 MiB).`, then green. `dist/` is 66.4 MiB and has no `cph-buildings.json`.
+- `npm run shots -- s1-data`: **PASS**, basemap loaded from CARTO, no browser errors. Arrow
+  counts equal item 1's on every view, `drawn` 2592 / 451 / 553 / 475 / 490 / 677 / 119 for the
+  sw4 views in table order, `wave-reduced-motion` identical and `wave-animating` differ,
+  `panel-routes` 4 routes with canyonEdges 363142. Report: `docs/renders/s1-data/report.md`.
+
+The patch files stay at the repo root until DJ's clean-up (they are gitignored).
 
 ## Item 4: data out of git, part 2: the cutover
 
