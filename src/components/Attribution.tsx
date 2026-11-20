@@ -3,12 +3,13 @@
 // terms ask for the credit on the map itself: "© OpenMapTiles" and the OpenStreetMap data
 // credit, each linked. The About dialog keeps the full list. Update this when the basemap
 // changes (docs/decisions.md D5).
+import { memo } from "react";
 import type { CSSProperties } from "react";
 import { COLORS, FONT } from "./ui";
 
 const link: CSSProperties = { color: "inherit", textDecoration: "none" };
 
-export default function Attribution({ style, short = false }: { style?: CSSProperties; short?: boolean }) {
+function Attribution({ style, short = false }: { style?: CSSProperties; short?: boolean }) {
   return (
     <div
       role="contentinfo"
@@ -32,3 +33,6 @@ export default function Attribution({ style, short = false }: { style?: CSSPrope
     </div>
   );
 }
+
+// Memoised: the map re-renders the app on every pan frame; this only re-renders when its props change.
+export default memo(Attribution);

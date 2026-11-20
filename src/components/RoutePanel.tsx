@@ -3,7 +3,7 @@
 // Presentational: all state lives in App, and every string or number the panel
 // says is decided in cyclist/routeCopy.ts. This file holds markup only.
 
-import { useState, type CSSProperties } from "react";
+import { memo, useState, type CSSProperties } from "react";
 import type { RouteOption, RankCriterion } from "../routing/windRoute";
 import { formatWindDelta, verdictFor, type BestWindow } from "../cyclist/routeCopy";
 import { BIKE_TYPES, specFor, kmhFor, type BikeType } from "../cyclist/bikeTypes";
@@ -86,7 +86,7 @@ const quietControl: CSSProperties = {
   cursor: "pointer",
 };
 
-export default function RoutePanel({
+function RoutePanel({
   active, onToggle, start, end, startLabel, endLabel,
   onPickStart, onPickEnd, onClearStart, onClearEnd, onSwap,
   gpsLoading, gpsError,
@@ -283,3 +283,6 @@ export default function RoutePanel({
     </div>
   );
 }
+
+// Memoised: the map re-renders the app on every pan frame; this only re-renders when its props change.
+export default memo(RoutePanel);

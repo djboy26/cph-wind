@@ -18,6 +18,7 @@ a step there only when the sprint plan points to it.
 | `npm run build` — `tsc -b && vite build` | |
 | `npm run dev` | |
 | `npm run data:pull` — the locked map data, after a fresh clone (`build` and `dev` run it first anyway) | |
+| `npm run perf` — what pans, zooms and the slider cost in headless Chromium, after `npm run build` (`scripts/perf.mjs`) | |
 
 `npm run test:watch` blocks indefinitely waiting for file changes. Never call it from an agent.
 Node 24 everywhere (`.nvmrc`, `engines`, CI).

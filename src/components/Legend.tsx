@@ -2,7 +2,7 @@
 // Collapsible cyclist shelter legend. The arrow colours are a ratio of today's wind,
 // so the reference ambient has to be on screen or the scale says nothing.
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { WIND_BANDS } from "../cyclist/windCategory";
 import { glass, pill, COLORS, NUM, label } from "./ui";
 
@@ -13,7 +13,7 @@ function rangeLabel(minRatio: number, maxRatio: number): string {
   return `${pct(minRatio)}–${pct(maxRatio)}%`;
 }
 
-export default function Legend({ isMobile, ambientSpeedMs }: { isMobile: boolean; ambientSpeedMs: number }) {
+function Legend({ isMobile, ambientSpeedMs }: { isMobile: boolean; ambientSpeedMs: number }) {
   const [open, setOpen] = useState(!isMobile);
 
   if (!open) {
@@ -66,3 +66,6 @@ export default function Legend({ isMobile, ambientSpeedMs }: { isMobile: boolean
     </div>
   );
 }
+
+// Memoised: the map re-renders the app on every pan frame; this only re-renders when its props change.
+export default memo(Legend);

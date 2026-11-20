@@ -9,6 +9,7 @@
 //   • daylight    — dark hours are shaded (a moon flags "you'll need lights")
 //   • best window — a tappable marker on the calmest/driest upcoming hour
 
+import { memo } from "react";
 import type { ForecastStep } from "../api/weather";
 import type { RideWindow } from "../cyclist/bestWindow";
 import { isDark } from "../cyclist/solar";
@@ -44,7 +45,7 @@ function hhmm(time: string): string {
   return new Date(time).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function TimeSlider({ steps, index, onChange, isMobile, lat, lon, rideWindow }: Props) {
+function TimeSlider({ steps, index, onChange, isMobile, lat, lon, rideWindow }: Props) {
   if (steps.length < 2) return null;
   const n = steps.length;
   const i = Math.max(0, Math.min(index, n - 1));
@@ -172,3 +173,6 @@ export default function TimeSlider({ steps, index, onChange, isMobile, lat, lon,
     </div>
   );
 }
+
+// Memoised: the map re-renders the app on every pan frame; this only re-renders when its props change.
+export default memo(TimeSlider);

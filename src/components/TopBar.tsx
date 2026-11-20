@@ -3,6 +3,7 @@
 // "Plan route" is a filled accent button (the one obvious call-to-action); on
 // mobile the live-wind block doubles as the brand so the CTA has room to be labelled.
 
+import { memo } from "react";
 import type { Wind } from "../math";
 import { feelsLikeC } from "../cyclist/feelsLike";
 import { glass, COLORS, NUM, FONT } from "./ui";
@@ -37,7 +38,7 @@ function WindDial({ deg, size = 30 }: { deg: number; size?: number }) {
   );
 }
 
-export default function TopBar({ wind, tempC, timestamp, loading, routingActive, onPlanRoute, onAbout, isMobile }: Props) {
+function TopBar({ wind, tempC, timestamp, loading, routingActive, onPlanRoute, onAbout, isMobile }: Props) {
   const deg = wind?.directionDeg ?? 0;
   const timestampLabel = timestamp
     ? new Date(timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
@@ -152,3 +153,6 @@ export default function TopBar({ wind, tempC, timestamp, loading, routingActive,
     </header>
   );
 }
+
+// Memoised: the map re-renders the app on every pan frame; this only re-renders when its props change.
+export default memo(TopBar);

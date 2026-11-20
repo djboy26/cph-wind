@@ -139,71 +139,113 @@ export function rowOffsetsM(halfW: number, p: number): number[] {
   return out;
 }
 
+/** The glyph size in pixels: the same for every arrow, at every zoom; phones a little larger. */
+export function arrowSizePx(isMobile = false): number {
+  return ARROW_PX + (isMobile ? PHONE_EXTRA_PX : 0);
+}
+
+/** One lattice point: where an arrow goes. Depends on the streets and the pitch only. */
+export interface LatticePoint {
+  seg: SegmentInput;
+  raw: RawSegment;
+  /** Offset along the street (m) from the piece's midpoint. */
+  alongM: number;
+  /** Offset across the street (m), + to the right of the bearing. */
+  crossM: number;
+  /** Planar position in metres (east, north), for the brightness-wave phase. */
+  x: number;
+  y: number;
+}
+
 /**
- * The arrow field. Every road carries a lattice in its own frame: columns along it
- * every pitchM metres from its first node (the pipeline gives each piece its startM),
- * rows across it at the same pitch, as many as fit inside the carriageway
- * (rowOffsetsM). The pitch is whole metres, chosen per zoom so neighbours sit at least
- * PITCH_PX apart on screen; at a given zoom the lattice is fixed to the road and
- * nothing about it depends on the viewport, the time, or the wind. Zooming changes
- * the pitch, so which metre marks carry an arrow changes; panning never does.
+ * The lattice. Every road carries one in its own frame: columns along it every p metres
+ * from its first node (the pipeline gives each piece its startM), rows across it at the
+ * same pitch, as many as fit inside the carriageway (rowOffsetsM). p is whole metres,
+ * chosen per zoom so neighbours sit at least PITCH_PX apart on screen (pitchM); at a
+ * given zoom the lattice is fixed to the road and nothing about it depends on the
+ * viewport, the time, or the wind. Zooming changes the pitch, so which metre marks
+ * carry an arrow changes; panning never does.
  *
  * A road's own lattice is never thinned: every column and every row is drawn in
  * full, so a straight road reads as a regular grid. Contention exists only between
  * different roads — a junction, a cycleway beside its road, a block grid seen from
  * far out. Roads are taken in rank order (arterial > residential > cycleway >
- * service, then lower way id), a road's points centre row first; a point is kept
+ * service, then way id), a road's points centre row first; a point is kept
  * unless it lies within OTHER_WAY_SEP × pitch of a kept point of another road, or
  * within SAME_WAY_SEP × pitch of one of its own (a piece boundary counted twice, the
  * inside of a sharp bend). Deterministic: the same view always draws the same arrows.
+ *
+ * Kept apart from the wind (colourLattice) so that moving the time slider recolours
+ * the arrows without placing them again.
  */
-export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFieldOptions): FlowLine[] {
-  const { mpp } = opts;
-  if (segments.length === 0 || !(mpp > 0)) return [];
-  const sizePx = ARROW_PX + (opts.isMobile ? PHONE_EXTRA_PX : 0);
+export function buildLattice(segments: RawSegment[], p: number): LatticePoint[] {
+  if (segments.length === 0 || !(p > 0)) return [];
   const lat0 = segments[0].lat * DEG;
   const mPerDegLon = M_PER_DEG_LAT * Math.cos(lat0);
-  const p = pitchM(mpp, opts.isMobile);
 
-  interface Cand { seg: SegmentInput; raw: RawSegment; cw: ReturnType<typeof computeSegmentCenterWind>; alongM: number; crossM: number; rank: number; i: number; way: string; x: number; y: number }
+  interface Cand extends LatticePoint { rank: number; i: number; way: string; key: number }
   const cands: Cand[] = [];
   for (const raw of segments) {
-    const seg = normalize(raw);
-    const L = seg.segmentLengthM;
     const startM = raw.startM ?? 0;
-    const rank = raw.classRank ?? 3;
-    const cw = computeSegmentCenterWind(seg, wind);
-    const rows = rowOffsetsM(roadWidthM(rank, seg.canyonW) / 2 - EDGE_MARGIN_M, p);
+    const L = raw.segmentLengthM ?? 30;
     const i0 = Math.ceil(startM / p);
     const i1 = Math.floor((startM + L) / p);
+    if (i0 > i1) continue; // no lattice column falls on this piece
+    const seg = normalize(raw);
+    const rank = raw.classRank ?? 3;
+    const rows = rowOffsetsM(roadWidthM(rank, seg.canyonW) / 2 - EDGE_MARGIN_M, p);
     const way = String(raw.wayId);
     for (let i = i0; i <= i1; i++) {
       const alongM = i * p - startM - L / 2; // relative to the piece's midpoint
       const p0 = offsetAlongBearing({ lon: seg.lon, lat: seg.lat }, seg.bearingDeg, alongM);
       for (const crossM of rows) {
         const q = crossM === 0 ? p0 : offsetAlongBearing(p0, seg.bearingDeg + 90, crossM);
-        cands.push({ seg, raw, cw, alongM, crossM, rank, i, way, x: q.lon * mPerDegLon, y: q.lat * M_PER_DEG_LAT });
+        cands.push({ seg, raw, alongM, crossM, rank, i, way, key: 0, x: q.lon * mPerDegLon, y: q.lat * M_PER_DEG_LAT });
       }
     }
   }
 
-  // Priority: rank, then way id, then the centre row outward, then along the way.
-  cands.sort((a, b) =>
+  // Priority: rank, then way id (as text, the order it has always had), then the centre
+  // row outward, then along the way. Packed into one exact integer per point
+  // (rank | way order | |cross| | column, 5 + 20 + 8 + 20 bits < 2^53) so the sort
+  // compares one number; the sort is stable, so equal keys keep their order exactly as
+  // the four-way comparison did. Out of range (never in the city data) it falls back.
+  const ways = [...new Set(cands.map((c) => c.way))].sort();
+  const wayOrder = new Map(ways.map((w, k) => [w, k]));
+  let packable = ways.length < 2 ** 20;
+  for (const c of cands) {
+    const a = Math.abs(c.crossM);
+    if (!(c.rank >= 0 && c.rank < 32 && Number.isInteger(c.rank) && a < 256 && Number.isInteger(a) && c.i >= 0 && c.i < 2 ** 20)) packable = false;
+    c.key = ((c.rank * 2 ** 20 + wayOrder.get(c.way)!) * 256 + a) * 2 ** 20 + c.i;
+  }
+  if (packable) cands.sort((a, b) => a.key - b.key);
+  else cands.sort((a, b) =>
     a.rank - b.rank
     || (a.way < b.way ? -1 : a.way > b.way ? 1 : 0)
     || Math.abs(a.crossM) - Math.abs(b.crossM)
     || a.i - b.i);
 
   // Spatial hash on the pitch; both separations are under one pitch, so the 3 × 3
-  // neighbourhood holds every point that could be too close.
+  // neighbourhood holds every point that could be too close. Cells are numbered from the
+  // candidates' own corner, so keys stay small integers (much cheaper to hash than
+  // strings or large numbers).
   const sameSep = SAME_WAY_SEP * p, otherSep = OTHER_WAY_SEP * p;
-  const kept = new Map<string, Cand[]>();
-  const accepted: Cand[] = [];
+  let cx0 = Infinity, cy0 = Infinity, cy1 = -Infinity;
+  for (const c of cands) {
+    const cx = Math.floor(c.x / p), cy = Math.floor(c.y / p);
+    if (cx < cx0) cx0 = cx;
+    if (cy < cy0) cy0 = cy;
+    if (cy > cy1) cy1 = cy;
+  }
+  const stride = cy1 - cy0 + 3;
+  const cellKey = (cx: number, cy: number) => (cx - cx0 + 1) * stride + (cy - cy0 + 1);
+  const kept = new Map<number, Cand[]>();
+  const accepted: LatticePoint[] = [];
   for (const c of cands) {
     const cx = Math.floor(c.x / p), cy = Math.floor(c.y / p);
     let clash = false;
     for (let dx = -1; dx <= 1 && !clash; dx++) for (let dy = -1; dy <= 1 && !clash; dy++) {
-      const near = kept.get((cx + dx) + ',' + (cy + dy));
+      const near = kept.get(cellKey(cx + dx, cy + dy));
       if (!near) continue;
       for (const q of near) {
         const d = Math.hypot(q.x - c.x, q.y - c.y);
@@ -211,18 +253,30 @@ export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFie
       }
     }
     if (clash) continue;
-    const key = cx + ',' + cy;
-    const list = kept.get(key) ?? [];
-    list.push(c); kept.set(key, list);
+    const key = cellKey(cx, cy);
+    const list = kept.get(key);
+    if (list) list.push(c); else kept.set(key, [c]);
     accepted.push(c);
   }
+  return accepted;
+}
 
+/**
+ * The arrows for a lattice under one wind: each POINTS in the local wind direction of
+ * its street (the canyon-modified flowDeg), is COLOURED by shelter and made more or
+ * less OPAQUE by absolute strength, and gets its phase in the brightness wave. p is the
+ * pitch the lattice was built with; the wave's wavelength is counted in it.
+ */
+export function colourLattice(points: LatticePoint[], wind: Wind, p: number, sizePx: number): FlowLine[] {
   const travelRad = ((wind.directionDeg + 180) % 360) * DEG;
   const waveX = Math.sin(travelRad), waveY = Math.cos(travelRad);
   const waveLenM = WAVELENGTH_CELLS * p;
+  // One street piece carries several points (columns, rows): its wind is computed once.
+  const windOf = new Map<SegmentInput, ReturnType<typeof computeSegmentCenterWind>>();
   const out: FlowLine[] = [];
-  for (const c of accepted) {
-    const cw = c.cw;
+  for (const c of points) {
+    let cw = windOf.get(c.seg);
+    if (!cw) { cw = computeSegmentCenterWind(c.seg, wind); windOf.set(c.seg, cw); }
     const color = windBandColor(shelterRatio(cw.speedMs, wind.speedMs));
     // Brightness wave travelling downwind across the whole field (see arrowAlpha):
     // phase is the arrow's position along the ambient wind vector, in wavelengths.
@@ -239,6 +293,14 @@ export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFie
     });
   }
   return out;
+}
+
+/** The arrow field in one call: buildLattice at the zoom's pitch, coloured by the wind. */
+export function buildFlowField(segments: RawSegment[], wind: Wind, opts: FlowFieldOptions): FlowLine[] {
+  const { mpp } = opts;
+  if (segments.length === 0 || !(mpp > 0)) return [];
+  const p = pitchM(mpp, opts.isMobile);
+  return colourLattice(buildLattice(segments, p), wind, p, arrowSizePx(opts.isMobile));
 }
 
 /** The arrow's centre: the piece's midpoint, then along the road, then across it. */

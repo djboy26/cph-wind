@@ -1,6 +1,7 @@
 // src/components/About.tsx
 // Methodology + attribution modal (controlled; trigger lives in the top bar).
 
+import { memo } from "react";
 import { glass, COLORS, FONT, label } from "./ui";
 import { Icon } from "./Icon";
 
@@ -8,7 +9,7 @@ const link: React.CSSProperties = { color: COLORS.accent, textDecoration: "none"
 const section: React.CSSProperties = { ...label, display: "block", marginTop: 20, marginBottom: 8 };
 const para: React.CSSProperties = { margin: "0 0 10px", color: COLORS.dim };
 
-export default function About({ open, onClose }: { open: boolean; onClose: () => void }) {
+function About({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
 
   return (
@@ -101,3 +102,6 @@ export default function About({ open, onClose }: { open: boolean; onClose: () =>
     </div>
   );
 }
+
+// Memoised: the map re-renders the app on every pan frame; this only re-renders when its props change.
+export default memo(About);

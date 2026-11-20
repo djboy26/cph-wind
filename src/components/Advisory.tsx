@@ -3,6 +3,7 @@
 // gusts, heavy rain). Rendered only when there's something to say, and it stacks
 // in the existing top status row so it can never overlap other UI.
 
+import { memo } from "react";
 import type { Advisory } from "../cyclist/advisory";
 import { glass, COLORS, FONT } from "./ui";
 import { Icon } from "./Icon";
@@ -13,7 +14,7 @@ const LEVEL_COLOR: Record<Advisory["level"], string> = {
   info: COLORS.accentInk,
 };
 
-export default function AdvisoryChip({ advisory }: { advisory: Advisory }) {
+function AdvisoryChip({ advisory }: { advisory: Advisory }) {
   const color = LEVEL_COLOR[advisory.level];
   return (
     <div
@@ -40,3 +41,6 @@ export default function AdvisoryChip({ advisory }: { advisory: Advisory }) {
     </div>
   );
 }
+
+// Memoised: the map re-renders the app on every pan frame; this only re-renders when its props change.
+export default memo(AdvisoryChip);
