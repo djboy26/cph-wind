@@ -114,8 +114,9 @@ cleanly, do not resolve it by hand: `git checkout -- .`, record it in the sprint
   count, the harness numbers) and commit that as `Record Step <n>`.
 - `npm run check` and `npm run build` must both pass before any commit.
 - A GitHub Action pushes `chore: wind-validation sample [skip ci]` to `main` every few hours. Rebase
-  rather than merge when it conflicts; it only touches data files. Vercel skips building commits
-  that touch only that log, docs or Markdown (`ignoreCommand` in `vercel.json`).
+  rather than merge when it conflicts; it only touches data files. On `main`, Vercel skips
+  commits that touch only that log, docs or Markdown; every other branch always gets a preview
+  (`scripts/vercel-ignore.sh`, run by `ignoreCommand` in `vercel.json`).
 - Pushing to `main` deploys straight to production. Work on a branch and open a PR.
 - If a step cannot be completed, stop and report. Do not work around it. A half-applied change to the
   wind model is worse than no change, because the current state is at least self-consistent within

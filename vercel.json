@@ -11,5 +11,5 @@
       ]
     }
   ],
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ':(exclude)validation-log.ndjson' ':(exclude)docs' ':(exclude)plans' ':(exclude)*.md'"
+  "ignoreCommand": "sh scripts/vercel-ignore.sh"
 }
