@@ -4,7 +4,7 @@ Live per-street wind for Copenhagen cyclists. React 19 + Vite + deck.gl + MapLib
 Wind from MET Norway Locationforecast through the `/api/wind` proxy (`api/wind.ts`); roads and
 buildings from OpenStreetMap.
 
-**Read `plans/sprint-1.md` (the current sprint) and `docs/decisions.md` before starting work.** The
+**Read `plans/sprint-2.md` (the current sprint) and `docs/decisions.md` before starting work.** The
 sprint plan carries each item's diagnosis, its acceptance checks and whether it runs unattended or
 goes through a PR with a preview link. Milestone 1's full record is `docs/history/PLAN-M1.md`; read
 a step there only when the sprint plan points to it.

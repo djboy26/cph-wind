@@ -90,7 +90,7 @@ export default function About({ open, onClose }: { open: boolean; onClose: () =>
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: COLORS.dim, lineHeight: 1.7 }}>
           <li>Roads &amp; buildings: © <a style={link} href="https://openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> (ODbL)</li>
           <li>Weather: <a style={link} href="https://api.met.no/" target="_blank" rel="noreferrer">MET Norway</a> (CC BY 4.0); validation <a style={link} href="https://www.dmi.dk/" target="_blank" rel="noreferrer">DMI</a></li>
-          <li>Basemap: © <a style={link} href="https://carto.com/attributions" target="_blank" rel="noreferrer">CARTO</a></li>
+          <li>Basemap: <a style={link} href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a>, © <a style={link} href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a>, data from <a style={link} href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a></li>
           <li>Engine: <a style={link} href="https://maplibre.org/" target="_blank" rel="noreferrer">MapLibre GL</a> · <a style={link} href="https://deck.gl/" target="_blank" rel="noreferrer">deck.gl</a></li>
         </ul>
 

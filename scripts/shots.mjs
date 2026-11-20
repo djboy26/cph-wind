@@ -4,7 +4,7 @@
 //
 // Serves dist/ on a local port, opens it in headless Chromium (Playwright) with the
 // wind mocked to a fixture, and writes PNGs plus a report.md to docs/renders/<label>/.
-// The basemap loads from CARTO as in production, so the pictures are what a person
+// The basemap loads from OpenFreeMap as in production, so the pictures are what a person
 // would see. Every view is fixed by URL hash (#z=…&lat=…&lon=…), so two runs of the
 // same commit differ only in what the code draws.
 //
@@ -31,6 +31,8 @@ const outDir = join(root, "docs", "renders", label);
 await mkdir(outDir, { recursive: true });
 
 const ONBOARDED_KEY = "cphwind.onboarded.v1"; // OnboardingHint.tsx
+// Every basemap request (style, TileJSON, tiles, glyphs, sprite) goes to this host: MAP_STYLE in src/App.tsx.
+const BASEMAP_HOST = /tiles\.openfreemap\.org/;
 
 // Views. H.C. Andersens Boulevard at Rådhuspladsen for the street shots — a wide
 // arterial with cycle tracks both sides, in the centre so its tiles always exist.
@@ -74,8 +76,8 @@ async function openPage(wind, vp, mobile, { onboarded = true, reducedMotion = fa
   await ctx.route(/photon\.komoot\.io|sentry|vercel-insights|vercel-analytics/, (r) => r.abort());
   const page = await ctx.newPage();
   const basemap = { ok: 0, failed: 0 };
-  page.on("response", (r) => { if (/cartocdn\.com/.test(r.url())) basemap[r.ok() ? "ok" : "failed"]++; });
-  page.on("requestfailed", (r) => { if (/cartocdn\.com/.test(r.url())) basemap.failed++; });
+  page.on("response", (r) => { if (BASEMAP_HOST.test(r.url())) basemap[r.ok() ? "ok" : "failed"]++; });
+  page.on("requestfailed", (r) => { if (BASEMAP_HOST.test(r.url())) basemap.failed++; });
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (m) => { if (m.type() === "error" && !/insights|_vercel|Failed to load resource/.test(m.text())) errors.push(`console: ${m.text().slice(0, 200)}`); });
   return { ctx, page, basemap };
@@ -232,7 +234,7 @@ const lines = [
   `# Renders: ${label}`,
   "",
   `Generated ${new Date().toISOString()} by \`npm run shots -- ${label}\`.`,
-  `Basemap: ${anyBasemap ? "loaded from CARTO" : "NOT loaded (no tile responses — offline machine?); pictures show the app's own layers only"}.`,
+  `Basemap: ${anyBasemap ? "loaded from OpenFreeMap" : "NOT loaded (no tile responses — offline machine?); pictures show the app's own layers only"}.`,
   `Result: ${failed || fatal.length ? "FAIL" : "PASS"}.`,
   "",
   "`arrows` is the field the CPU built for the view, padding included; `drawn` is how many of them the GPU drew on screen.",

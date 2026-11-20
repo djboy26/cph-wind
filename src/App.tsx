@@ -61,9 +61,10 @@ interface HoverState {
 }
 
 const COPENHAGEN = { lat: 55.6761, lon: 12.5683 };
-// "Daylight" — a clean light basemap, then recoloured at runtime (applyDaylight)
-// into the warm "Copenhagen Morning" palette (see THEME).
-const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+// "Daylight": OpenFreeMap's Positron, a clean light basemap (free, no key, no request limits,
+// commercial use allowed; docs/decisions.md D5), recoloured at runtime (applyDaylight) into
+// the warm "Copenhagen Morning" palette (see THEME). The credit is components/Attribution.
+const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const MOBILE_BREAKPOINT = 768;
 
 // "Copenhagen Morning" palette — warm linen land, harbour-tinted teal water,
@@ -83,9 +84,10 @@ const THEME = {
 };
 const BUILDING_RGB: [number, number, number] = [235, 228, 212]; // matches THEME.building
 
-// Recolour the light basemap into the Daylight palette. Carto's gl styles use
-// well-named layers, so we classify by id/type and repaint role by role — robust
-// to the exact layer set, and far less code than authoring a full style.json.
+// Recolour the light basemap into the Daylight palette. OpenMapTiles styles use
+// well-named layers (water, park, landcover_wood, building, boundary_*, highway_*,
+// *_casing), so we classify by id/type and repaint role by role — robust to the exact
+// layer set, and far less code than authoring a full style.json.
 function applyDaylight(map: maplibregl.Map) {
   const layers = map.getStyle()?.layers ?? [];
   for (const l of layers) {
@@ -924,7 +926,7 @@ function MapApp() {
     // Desktop: 12 px above the bottom edge leaves the credit line its own row under it.
     : { position: "absolute", bottom: 28, right: 16, zIndex: 20 };
 
-  // The map credit (OSM/CARTO) must stay on screen. Desktop: its own row under the
+  // The map credit (OpenStreetMap, OpenMapTiles) must stay on screen. Desktop: its own row under the
   // legend. Phone: right-aligned on the legend's row (the legend pill sits left); while
   // the route sheet owns the bottom, just under the top bar.
   const attributionStyle: React.CSSProperties = isMobile

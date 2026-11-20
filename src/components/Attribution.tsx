@@ -1,7 +1,8 @@
 // src/components/Attribution.tsx
-// Map credits, always on screen. OpenStreetMap's ODbL attribution guidelines and the
-// basemap provider's terms ask for the credit on the map itself; the About dialog keeps
-// the full list. Update the basemap credit when the basemap changes (Protomaps, sprint 2).
+// Map credits, always on screen. OpenStreetMap's attribution guidelines and OpenFreeMap's
+// terms ask for the credit on the map itself: "© OpenMapTiles" and the OpenStreetMap data
+// credit, each linked. The About dialog keeps the full list. Update this when the basemap
+// changes (docs/decisions.md D5).
 import type { CSSProperties } from "react";
 import { COLORS, FONT } from "./ui";
 
@@ -26,7 +27,8 @@ export default function Attribution({ style, short = false }: { style?: CSSPrope
       }}
     >
       © <a style={link} href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>
-      {short ? "" : " contributors"} · © <a style={link} href="https://carto.com/attributions" target="_blank" rel="noreferrer">CARTO</a>
+      {short ? "" : " contributors"} · © <a style={link} href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a>
+      {short ? "" : <> · <a style={link} href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a></>}
     </div>
   );
 }
