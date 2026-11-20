@@ -13,7 +13,9 @@ function rangeLabel(minRatio: number, maxRatio: number): string {
   return `${pct(minRatio)}–${pct(maxRatio)}%`;
 }
 
-function Legend({ isMobile, ambientSpeedMs }: { isMobile: boolean; ambientSpeedMs: number }) {
+function Legend({ isMobile, ambientSpeedMs, colors }: { isMobile: boolean; ambientSpeedMs: number; colors?: readonly [number, number, number][] }) {
+  // The look's band colours (src/looks), in WIND_BANDS order; the bands' own without one.
+  const rgb = (i: number) => { const c = colors?.[i] ?? WIND_BANDS[i].color; return `rgb(${c[0]},${c[1]},${c[2]})`; };
   const [open, setOpen] = useState(!isMobile);
 
   if (!open) {
@@ -24,8 +26,8 @@ function Legend({ isMobile, ambientSpeedMs }: { isMobile: boolean; ambientSpeedM
         style={{ ...pill, display: "flex", alignItems: "center", gap: 8, fontWeight: 600 }}
       >
         <span style={{ display: "flex", gap: 2 }}>
-          {WIND_BANDS.map((b) => (
-            <span key={b.key} style={{ width: 7, height: 13, borderRadius: 2, background: `rgb(${b.color[0]},${b.color[1]},${b.color[2]})` }} />
+          {WIND_BANDS.map((b, i) => (
+            <span key={b.key} style={{ width: 7, height: 13, borderRadius: 2, background: rgb(i) }} />
           ))}
         </span>
         Wind scale
@@ -48,13 +50,13 @@ function Legend({ isMobile, ambientSpeedMs }: { isMobile: boolean; ambientSpeedM
           up. The one-line explanations moved to each row's tooltip: on one line each they
           made the legend 620 px wide, a sixth of a laptop screen. */}
       <div role="list" style={{ display: "grid", gridTemplateColumns: "13px max-content max-content", columnGap: 10, rowGap: 6, alignItems: "center" }}>
-        {WIND_BANDS.map((b) => (
+        {WIND_BANDS.map((b, i) => (
           <div key={b.key} role="listitem" title={b.blurb} aria-label={`${b.label}, ${rangeLabel(b.minRatio, b.maxRatio)} of today's wind: ${b.blurb}`} style={{ display: "contents" }}>
             <span
               style={{
                 width: 13, height: 13, borderRadius: 4,
-                background: `rgb(${b.color[0]},${b.color[1]},${b.color[2]})`,
-                boxShadow: "0 0 0 1px rgba(28,39,51,0.12)",
+                background: rgb(i),
+                boxShadow: `0 0 0 1px ${COLORS.swatchRing}`,
               }}
             />
             <span title={b.blurb} style={{ fontSize: 11.5, fontWeight: 600, color: COLORS.text, whiteSpace: "nowrap", cursor: "help" }}>{b.label}</span>

@@ -8,27 +8,37 @@ import type { CSSProperties } from "react";
 // Inter (self-hosted via @fontsource/inter, imported in main.tsx) with a sturdy system fallback.
 export const FONT = "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
-// Calm Nordic ink against the warm "Copenhagen Morning" map. Surfaces are frosted
-// white; the accent is a single composed blue used sparingly for what's live/active.
+// Every colour is a CSS variable set by the current look (src/looks/looks.ts), with the
+// Morning value as its fallback, so the panels repaint when the look changes without a
+// React render. Morning: calm Nordic ink against the warm map, frosted white surfaces,
+// a single composed blue used sparingly for what's live/active.
+const v = (name: string, morning: string) => `var(${name}, ${morning})`;
 export const COLORS = {
-  text: "#16202b",   // cool near-black ink
-  dim: "#586573",
-  faint: "#929cab",
-  line: "rgba(20,32,43,0.10)",
-  hairline: "rgba(20,32,43,0.06)",
-  accent: "#2f6af0",
-  accentInk: "#1c4fd0",
-  accentWash: "rgba(47,106,240,0.10)",
-  accentLine: "rgba(47,106,240,0.42)",
+  text: v("--c-text", "#16202b"),   // cool near-black ink
+  dim: v("--c-dim", "#586573"),
+  faint: v("--c-faint", "#929cab"),
+  line: v("--c-line", "rgba(20,32,43,0.10)"),
+  hairline: v("--c-hairline", "rgba(20,32,43,0.06)"),
+  accent: v("--c-accent", "#2f6af0"),
+  accentInk: v("--c-accent-ink", "#1c4fd0"),
+  accentWash: v("--c-accent-wash", "rgba(47,106,240,0.10)"),
+  accentLine: v("--c-accent-line", "rgba(47,106,240,0.42)"),
   // Teal/rust, not green/red. This pair carries the tailwind/headwind distinction
   // — the most important signal in the app — and green vs red is the one pair that
   // ~8% of men cannot separate: #1f9d57 vs #e0533d measured OKLab ΔE 5.5 under
   // deuteranopia, below the 8 floor. Teal vs rust measures 15.4. Both clear WCAG
   // 4.5:1 text contrast on the frosted surfaces (5.29:1 and 5.13:1 on white).
-  good: "#2e7488",
-  warn: "#cf871d",
-  bad: "#b0522e",
-  chipBg: "rgba(20,32,43,0.045)",
+  good: v("--c-good", "#2e7488"),
+  warn: v("--c-warn", "#cf871d"),
+  bad: v("--c-bad", "#b0522e"),
+  chipBg: v("--c-chip", "rgba(20,32,43,0.045)"),
+  surface: v("--c-surface", "#ffffff"),
+  credit: v("--c-credit", "rgba(247,242,233,0.82)"),
+  nightTint: v("--c-night-tint", "rgba(40,52,86,0.13)"),
+  dialFace: v("--c-dial-face", "rgba(28,39,51,0.04)"),
+  dialRing: v("--c-dial-ring", "rgba(28,39,51,0.22)"),
+  dialTail: v("--c-dial-tail", "rgba(28,39,51,0.4)"),
+  swatchRing: v("--c-swatch-ring", "rgba(28,39,51,0.12)"),
 };
 
 // 4px base rhythm — every gap/padding is a multiple, so spacing reads intentional.
@@ -37,8 +47,8 @@ export const RADIUS = { sm: 10, md: 14, lg: 18, pill: 999 } as const;
 
 // Layered elevation: a tight contact shadow + a soft ambient one. No single heavy blur.
 export const SHADOW = {
-  card: "0 1px 2px rgba(20,32,43,0.06), 0 10px 30px rgba(20,32,43,0.13)",
-  pop: "0 2px 8px rgba(20,32,43,0.10), 0 22px 52px rgba(20,32,43,0.20)",
+  card: v("--c-shadow-card", "0 1px 2px rgba(20,32,43,0.06), 0 10px 30px rgba(20,32,43,0.13)"),
+  pop: v("--c-shadow-pop", "0 2px 8px rgba(20,32,43,0.10), 0 22px 52px rgba(20,32,43,0.20)"),
 };
 
 // Standard motion curve — decisive out, gentle settle.
@@ -59,12 +69,12 @@ export const label: CSSProperties = {
   color: COLORS.faint,
 };
 
-/** Frosted white card — the base look for every floating panel. */
+/** The floating panel (frosted white in Morning) — the base look for every panel. */
 export const glass: CSSProperties = {
-  background: "rgba(255,255,255,0.72)",
-  backdropFilter: "blur(20px) saturate(1.7)",
-  WebkitBackdropFilter: "blur(20px) saturate(1.7)",
-  border: "1px solid rgba(255,255,255,0.66)",
+  background: v("--c-panel", "rgba(255,255,255,0.72)"),
+  backdropFilter: v("--c-panel-blur", "blur(20px) saturate(1.7)"),
+  WebkitBackdropFilter: v("--c-panel-blur", "blur(20px) saturate(1.7)"),
+  border: `1px solid ${v("--c-panel-border", "rgba(255,255,255,0.66)")}`,
   borderRadius: RADIUS.lg,
   boxShadow: SHADOW.card,
   color: COLORS.text,
@@ -80,7 +90,7 @@ export const pill: CSSProperties = {
   borderWidth: 1,
   borderStyle: "solid",
   borderColor: COLORS.line,
-  background: "rgba(20,32,43,0.04)",
+  background: COLORS.chipBg,
   color: COLORS.text,
   cursor: "pointer",
   fontSize: 13,

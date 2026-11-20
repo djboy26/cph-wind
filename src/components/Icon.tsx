@@ -135,11 +135,11 @@ export function Icon({ name, size = 18, stroke = 1.6, color = "currentColor", st
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke={color}
+      stroke="currentColor"
       strokeWidth={stroke}
       strokeLinecap="round"
       strokeLinejoin="round"
-      style={{ flex: "0 0 auto", display: "block", ...style }}
+      style={{ flex: "0 0 auto", display: "block", color, ...style }}
       aria-hidden
     >
       {PATHS[name]}

@@ -72,7 +72,7 @@ function fmtMin(s: number) {
 // it is an aesthetic one. `glass` stays on the small floating wind chip.
 const sheet: CSSProperties = {
   ...glass,
-  background: "#ffffff",
+  background: COLORS.surface,
   backdropFilter: "none",
   WebkitBackdropFilter: "none",
 };
