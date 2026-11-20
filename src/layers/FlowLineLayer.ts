@@ -17,7 +17,7 @@ import {
   type SegmentInput,
   type Wind,
 } from '../math';
-import { windBandColor, shelterRatio } from '../cyclist/windCategory';
+import { windBandColor, windBandIndex, shelterRatio } from '../cyclist/windCategory';
 import type { RawSegment } from './buildWindArrows';
 
 const DEG = Math.PI / 180;
@@ -267,7 +267,7 @@ export function buildLattice(segments: RawSegment[], p: number): LatticePoint[] 
  * less OPAQUE by absolute strength, and gets its phase in the brightness wave. p is the
  * pitch the lattice was built with; the wave's wavelength is counted in it.
  */
-export function colourLattice(points: LatticePoint[], wind: Wind, p: number, sizePx: number): FlowLine[] {
+export function colourLattice(points: LatticePoint[], wind: Wind, p: number, sizePx: number, palette?: readonly [number, number, number][]): FlowLine[] {
   const travelRad = ((wind.directionDeg + 180) % 360) * DEG;
   const waveX = Math.sin(travelRad), waveY = Math.cos(travelRad);
   const waveLenM = WAVELENGTH_CELLS * p;
@@ -277,7 +277,9 @@ export function colourLattice(points: LatticePoint[], wind: Wind, p: number, siz
   for (const c of points) {
     let cw = windOf.get(c.seg);
     if (!cw) { cw = computeSegmentCenterWind(c.seg, wind); windOf.set(c.seg, cw); }
-    const color = windBandColor(shelterRatio(cw.speedMs, wind.speedMs));
+    // The look's six band colours when given (src/looks), else the bands' own.
+    const ratio = shelterRatio(cw.speedMs, wind.speedMs);
+    const color = palette ? palette[windBandIndex(ratio)] : windBandColor(ratio);
     // Brightness wave travelling downwind across the whole field (see arrowAlpha):
     // phase is the arrow's position along the ambient wind vector, in wavelengths.
     const phase = (((c.x * waveX + c.y * waveY) / waveLenM) % 1 + 1) % 1;

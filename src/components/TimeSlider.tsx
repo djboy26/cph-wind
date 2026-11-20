@@ -30,7 +30,7 @@ interface Props {
 const nowrap = { whiteSpace: "nowrap" } as const;
 const RAIN_FULL_MM = 4; // precip at/above this fills the bar height
 const RAIN_COLOR = "rgba(47,106,240,0.55)";
-const NIGHT_TINT = "rgba(40,52,86,0.13)";
+const NIGHT_TINT = COLORS.nightTint;
 
 function stepLabel(steps: ForecastStep[], index: number): string {
   if (index <= 0) return "Now";

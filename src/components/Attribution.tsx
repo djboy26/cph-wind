@@ -20,7 +20,7 @@ function Attribution({ style, short = false }: { style?: CSSProperties; short?: 
         lineHeight: short ? "14px" : "16px",
         textAlign: "right",
         color: COLORS.dim,
-        background: "rgba(247,242,233,0.82)",
+        background: COLORS.credit,
         padding: "0 6px",
         borderRadius: 6,
         whiteSpace: "nowrap",

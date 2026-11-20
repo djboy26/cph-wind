@@ -115,6 +115,11 @@ export function windBandColor(ratio: number): RGB {
   return windBand(ratio).color;
 }
 
+/** Index of the shelter band for a ratio (0 = deeply sheltered … 5 = strongly channelled). */
+export function windBandIndex(ratio: number): number {
+  return WIND_BANDS.indexOf(windBand(ratio));
+}
+
 // ---------------- Route impact (head / tail / cross) ----------------
 
 export interface RouteImpactBand {

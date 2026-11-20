@@ -20,6 +20,7 @@ import { arrowDensityForZoom, type RawSegment } from "./layers/buildWindArrows";
 import { offsetAlongBearing, type GeometrySource } from "./math";
 import { arrowSizePx, buildLattice, colourLattice, createFlowLineLayer, pitchM, roadWidthM, type FlowLine } from "./layers/FlowLineLayer";
 import { boxForBounds, boxKey } from "./layers/viewBox";
+import { applyLookToDocument, applyLookToMap, lookFromHash, type Look } from "./looks/looks";
 import { chunkKeysForBox, type BuildingRow } from "./buildings/chunks";
 import { createBuildingsClient, type BuildingsClient } from "./buildings/client";
 import { rankRoutes, routeMetrics, type RouteOption, type RankCriterion } from "./routing/windRoute";
@@ -61,73 +62,17 @@ interface HoverState {
 }
 
 const COPENHAGEN = { lat: 55.6761, lon: 12.5683 };
-// "Daylight": OpenFreeMap's Positron, a clean light basemap (free, no key, no request limits,
-// commercial use allowed; docs/decisions.md D5), recoloured at runtime (applyDaylight) into
-// the warm "Copenhagen Morning" palette (see THEME). The credit is components/Attribution.
+// OpenFreeMap's Positron, a clean light basemap (free, no key, no request limits, commercial
+// use allowed; docs/decisions.md D5), recoloured at runtime into the current look
+// (applyLookToMap in src/looks/looks.ts). The credit is components/Attribution.
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const MOBILE_BREAKPOINT = 768;
 
-// "Copenhagen Morning" palette — warm linen land, harbour-tinted teal water,
-// fresh parks, warm-bone buildings. A daylight feel of its own, not an Apple clone:
-// the water leans aqua-teal (the harbour) rather than sky-blue, parks are livelier,
-// and labels sit on a slightly deeper ink for crisper reading.
-const THEME = {
-  land: "#f2ede2",
-  water: "#9ed3d8",
-  park: "#c6dca8",
-  road: "#ffffff",
-  roadCasing: "#e8dfcc",
-  building: "#ebe4d4",
-  boundary: "#d8ccb6",
-  ink: "#3d4856",
-  halo: "#f7f2e9",
-};
-const BUILDING_RGB: [number, number, number] = [235, 228, 212]; // matches THEME.building
-// Module-level, so every chunk layer gets the same accessor and material objects.
-const BUILDING_FILL: [number, number, number, number] = [...BUILDING_RGB, 244];
-const BUILDING_MATERIAL = { ambient: 0.72, diffuse: 0.55, shininess: 8, specularColor: [60, 58, 52] as [number, number, number] };
+// Every colour of the map, the arrows and the panels comes from the current look
+// (src/looks/looks.ts; `#look=night` in the URL). Morning is today's look.
 const buildingRing = (d: BuildingRow) => d[1];
 const buildingHeight = (d: BuildingRow) => d[0];
 const NO_BUILDINGS: BuildingRow[] = [];
-
-// Recolour the light basemap into the Daylight palette. OpenMapTiles styles use
-// well-named layers (water, park, landcover_wood, building, boundary_*, highway_*,
-// *_casing), so we classify by id/type and repaint role by role — robust to the exact
-// layer set, and far less code than authoring a full style.json.
-function applyDaylight(map: maplibregl.Map) {
-  const layers = map.getStyle()?.layers ?? [];
-  for (const l of layers) {
-    const id = l.id.toLowerCase();
-    const set = (prop: string, val: unknown) => {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        map.setPaintProperty(l.id, prop as any, val as any);
-      } catch { /* layer lacks prop */ }
-    };
-    try {
-      if (l.type === "background") { set("background-color", THEME.land); continue; }
-      if (id.includes("water") && !id.includes("name") && !id.includes("label")) {
-        set("fill-color", THEME.water); set("line-color", THEME.water); continue;
-      }
-      if (/(park|wood|grass|green|forest|landcover|pitch|cemetery|scrub|garden)/.test(id) && l.type === "fill") {
-        set("fill-color", THEME.park); set("fill-opacity", 0.85); continue;
-      }
-      if (id.includes("building") && l.type === "fill") {
-        set("fill-color", THEME.building); set("fill-opacity", 0.65); continue;
-      }
-      if (id.includes("boundary") && l.type === "line") { set("line-color", THEME.boundary); continue; }
-      if (/(road|street|bridge|tunnel|transit|rail|highway|path)/.test(id) && l.type === "line") {
-        set("line-color", id.includes("casing") || id.includes("outline") ? THEME.roadCasing : THEME.road);
-        continue;
-      }
-      if (l.type === "symbol") {
-        set("text-color", THEME.ink);
-        set("text-halo-color", THEME.halo);
-        set("text-halo-width", 1.3);
-      }
-    } catch { /* skip any uncooperative layer */ }
-  }
-}
 
 // Hard-lock the camera to Greater Copenhagen (data bounds + a little padding) so
 // the map can never wander off to another city or country.
@@ -145,13 +90,9 @@ const BIKE_LANES_MIN_ZOOM = 15;
 // (roadWidthM), so the arrows are inside it by construction. Below this zoom the
 // basemap's own roads are about the right width and the band would only add weight.
 const ROAD_BAND_MIN_ZOOM = 16;
-const ROAD_BAND_RGBA: [number, number, number, number] = [255, 255, 255, 240];
-const ROAD_CASING_RGBA: [number, number, number, number] = [222, 214, 199, 255];
 const ROAD_CASING_M = 1.2;
 // OSM cycleway values that mean "there is bike infrastructure on this road".
 const BIKE_LANE_TAGS = new Set(["track", "lane", "shared_lane", "separate", "segregated", "opposite_track", "opposite_lane", "designated"]);
-const BIKE_LANE_RGBA: [number, number, number, number] = [38, 140, 92, 210];
-const BIKE_LANE_ON_ROAD_RGBA: [number, number, number, number] = [38, 140, 92, 130];
 const clampN = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 function constrainView<T extends { longitude?: number; latitude?: number; zoom?: number }>(vs: T): T {
   return {
@@ -292,6 +233,21 @@ function writeStoredBikeType(t: BikeType): void {
 function MapApp() {
   const isMobile = useIsMobile();
   const reducedMotion = useReducedMotion();
+  // The look (`#look=` in the URL; Morning by default), and `#hud=0` for the bare map.
+  // Both follow the URL while the page is open, so a look can be tried by editing it.
+  const [look, setLook] = useState<Look>(() => lookFromHash(typeof location !== "undefined" ? location.hash : ""));
+  const [hud, setHud] = useState(() => typeof location === "undefined" || new URLSearchParams(location.hash.replace(/^#/, "")).get("hud") !== "0");
+  useEffect(() => {
+    const onHash = () => {
+      setLook(lookFromHash(location.hash));
+      setHud(new URLSearchParams(location.hash.replace(/^#/, "")).get("hud") !== "0");
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  useEffect(() => { applyLookToDocument(look); }, [look]);
+  const mapInstance = useRef<maplibregl.Map | null>(null);
+  useEffect(() => { if (mapInstance.current) applyLookToMap(mapInstance.current, look); }, [look]);
   const deckRef = useRef<DeckGLRef | null>(null);
   const windowSize = useWindowSize();
 
@@ -710,8 +666,8 @@ function MapApp() {
     [visibleSegments, pitch, density],
   );
   const flowLines = useMemo<FlowLine[]>(
-    () => (!activeWind || lattice.length === 0 ? [] : colourLattice(lattice, activeWind, pitch, arrowSizePx(isMobile))),
-    [lattice, activeWind, pitch, isMobile],
+    () => (!activeWind || lattice.length === 0 ? [] : colourLattice(lattice, activeWind, pitch, arrowSizePx(isMobile), look.bands)),
+    [lattice, activeWind, pitch, isMobile, look],
   );
 
   // The road band under the arrows (see ROAD_BAND_MIN_ZOOM): one path per 30 m piece,
@@ -728,10 +684,10 @@ function MapApp() {
     });
     const common = { data: pieces, getPath: (d: { path: [number, number][] }) => d.path, widthUnits: "meters" as const, capRounded: true, jointRounded: true, pickable: false };
     return [
-      new PathLayer<{ path: [number, number][]; widthM: number }>({ ...common, id: "road-casing", getColor: ROAD_CASING_RGBA, getWidth: (d) => d.widthM + 2 * ROAD_CASING_M }),
-      new PathLayer<{ path: [number, number][]; widthM: number }>({ ...common, id: "road-band", getColor: ROAD_BAND_RGBA, getWidth: (d) => d.widthM }),
+      new PathLayer<{ path: [number, number][]; widthM: number }>({ ...common, id: "road-casing", getColor: look.roadCasing, getWidth: (d) => d.widthM + 2 * ROAD_CASING_M }),
+      new PathLayer<{ path: [number, number][]; widthM: number }>({ ...common, id: "road-band", getColor: look.roadBand, getWidth: (d) => d.widthM }),
     ];
-  }, [visibleSegments, showRoadBand]);
+  }, [visibleSegments, showRoadBand, look]);
 
   // Only extrude the buildings near the view — 220k city-wide footprints would choke
   // the GPU: the 0.02° chunks under the padded box (buildings/chunks.ts). The worker
@@ -828,10 +784,10 @@ function MapApp() {
         extruded: true,
         getPolygon: buildingRing,
         getElevation: buildingHeight,
-        getFillColor: BUILDING_FILL,
+        getFillColor: look.buildingFill,
         stroked: false,
         // Matte, warmly-lit ivory — soft daylight shading, no harsh speculars.
-        material: BUILDING_MATERIAL,
+        material: look.buildingMaterial,
         pickable: false,
       });
     const layers: Layer[] = warmBuildings ? [chunk("buildings-warmup", NO_BUILDINGS)] : [];
@@ -840,7 +796,7 @@ function MapApp() {
       if (rows && rows.length > 0) layers.push(chunk(`buildings-${key}`, rows));
     }
     return layers;
-  }, [buildingKeys, buildingChunks, warmBuildings]);
+  }, [buildingKeys, buildingChunks, warmBuildings, look]);
 
   // Routes + endpoints draw on TOP of the wind arrows. Also kept off the per-frame
   // path so the route polylines aren't rebuilt while arrows animate.
@@ -938,7 +894,8 @@ function MapApp() {
         id: "bike-lanes",
         data: lanes,
         getPath: (f) => (f.geometry as LineString).coordinates as [number, number][],
-        getColor: (f) => ((f.properties as { highway?: string | null }).highway === "cycleway" ? BIKE_LANE_RGBA : BIKE_LANE_ON_ROAD_RGBA),
+        getColor: (f) => ((f.properties as { highway?: string | null }).highway === "cycleway" ? look.bikeLane : look.bikeLaneOnRoad),
+        updateTriggers: { getColor: look.id },
         getWidth: (f) => ((f.properties as { highway?: string | null }).highway === "cycleway" ? 2 : 1.5),
         widthUnits: "pixels",
         capRounded: true,
@@ -947,7 +904,7 @@ function MapApp() {
         visible: showBikeLanes,
       }),
     ];
-  }, [bikeLanes, showBikeLanes]);
+  }, [bikeLanes, showBikeLanes, look]);
 
   const layers = useMemo(
     () => [...buildingLayers, ...roadBandLayers, ...bikeLaneLayers, ...flowLineLayers, ...routeLayers],
@@ -1045,7 +1002,7 @@ function MapApp() {
     : { position: "absolute", bottom: 16, left: 14, zIndex: 22 };
 
   return (
-    <div className="app-root" style={{ position: "relative", background: THEME.land, overflow: "hidden" }}>
+    <div className="app-root" style={{ position: "relative", background: look.map.land, overflow: "hidden" }}>
       <DeckGL
         ref={deckRef}
         initialViewState={initialViewState}
@@ -1065,11 +1022,11 @@ function MapApp() {
           // phones; the app draws the credit itself (components/Attribution) where the
           // layout has room for it. The About dialog keeps the full list.
           attributionControl={false}
-          onLoad={(e: { target: maplibregl.Map }) => applyDaylight(e.target)}
+          onLoad={(e: { target: maplibregl.Map }) => { mapInstance.current = e.target; applyLookToMap(e.target, look); }}
         />
       </DeckGL>
 
-      <TopBar
+      {hud && <TopBar
         wind={activeWind}
         tempC={activeConditions?.tempC}
         timestamp={windResult?.timestamp}
@@ -1078,7 +1035,7 @@ function MapApp() {
         onPlanRoute={toggleRouting}
         onAbout={openAbout}
         isMobile={isMobile}
-      />
+      />}
 
       {/* Transient status chips + the conditions advisory, centered just under the
           bar. Column layout so they stack instead of overlapping. */}
@@ -1087,7 +1044,7 @@ function MapApp() {
         {showWindError && <div className="ui-fade" style={statusChip(COLORS.bad)}>Wind error: {windError!.message}</div>}
         {stillLoading && !dataError && <div className="ui-fade" style={statusChip(COLORS.dim)}>Loading streets…</div>}
         {windLoading && !windResult && !stillLoading && <div className="ui-fade" style={statusChip(COLORS.dim)}>Loading wind…</div>}
-        {!stillLoading && !showWindError && !showDataError && advisory && <AdvisoryChip advisory={advisory} />}
+        {hud && !stillLoading && !showWindError && !showDataError && advisory && <AdvisoryChip advisory={advisory} />}
       </div>
 
       {routing && (
@@ -1126,13 +1083,13 @@ function MapApp() {
         </div>
       )}
 
-      {windResult && !stillLoading && !(routing && isMobile) && (
+      {hud && windResult && !stillLoading && !(routing && isMobile) && (
         <div style={legendStyle}>
-          <Legend isMobile={isMobile} ambientSpeedMs={activeWind?.speedMs ?? 0} />
+          <Legend isMobile={isMobile} ambientSpeedMs={activeWind?.speedMs ?? 0} colors={look.bands} />
         </div>
       )}
 
-      {showSlider && (
+      {hud && showSlider && (
         <div ref={sliderRef} className="ui-up" style={sliderStyle}>
           <TimeSlider
             steps={forecast}
@@ -1148,7 +1105,7 @@ function MapApp() {
 
       <Attribution style={attributionStyle} short={isMobile} />
 
-      {!stillLoading && <OnboardingHint isMobile={isMobile} />}
+      {hud && !stillLoading && <OnboardingHint isMobile={isMobile} />}
 
       {activeTip && (
         <SegmentTooltip
