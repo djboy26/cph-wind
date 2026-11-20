@@ -2,6 +2,7 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import DeckGL from "@deck.gl/react";
+import type { DeckGLRef } from "@deck.gl/react";
 import { PathLayer, ScatterplotLayer, PolygonLayer } from "@deck.gl/layers";
 import { WebMercatorViewport, Layer } from "@deck.gl/core";
 import type { PickingInfo } from "@deck.gl/core";
@@ -11,6 +12,9 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import type { Feature, FeatureCollection, LineString } from "geojson";
 import { useCurrentWind } from "./hooks/useCurrentWind";
+import { dataUrl } from "./data/base";
+import { useReducedMotion } from "./hooks/useReducedMotion";
+import { useRedrawLoop } from "./hooks/useRedrawLoop";
 import { reverseGeocode } from "./api/geocode";
 import { arrowDensityForZoom, type RawSegment } from "./layers/buildWindArrows";
 import { offsetAlongBearing, type GeometrySource } from "./math";
@@ -26,6 +30,7 @@ import About from "./components/About";
 import OnboardingHint from "./components/OnboardingHint";
 import TimeSlider from "./components/TimeSlider";
 import AdvisoryChip from "./components/Advisory";
+import Attribution from "./components/Attribution";
 import { cyclingAdvisory } from "./cyclist/advisory";
 import { bestRideWindow } from "./cyclist/bestWindow";
 import { forecastNote } from "./cyclist/routeCopy";
@@ -175,33 +180,6 @@ function useIsMobile() {
   return isMobile;
 }
 
-// Continuously increasing seconds (wrapped well above any animation cycle).
-// The FlowLineLayer derives per-arrow drift from this, so keeping it smooth and
-// unwrapped avoids visible jumps when arrows animate at different rates.
-//
-// Each tick re-renders the app, so we cap the emit rate via minIntervalMs (30 fps
-// on phones) — the drift advances by real elapsed time, so motion stays the same
-// speed, we just spend half the CPU on a mobile GPU/CPU. 0 = every frame.
-function useFlowPhase(minIntervalMs = 0) {
-  const [flowPhase, setFlowPhase] = useState(0);
-  const rafRef = useRef<number>(0);
-
-  useEffect(() => {
-    let lastEmit = performance.now();
-    const tick = (now: number) => {
-      rafRef.current = requestAnimationFrame(tick);
-      const dt = now - lastEmit;
-      if (dt < minIntervalMs) return;
-      lastEmit = now;
-      setFlowPhase((p) => (p + dt / 1000) % 3600);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [minIntervalMs]);
-
-  return flowPhase;
-}
-
 function useWindowSize() {
   const [size, setSize] = useState(() => ({
     width: typeof window !== "undefined" ? window.innerWidth : 1280,
@@ -253,9 +231,6 @@ class ErrorBoundary extends Component<{ children: ReactNode; silent?: boolean },
 const SNAP_DEG = 0.004;
 const BOUNDS_PAD = 0.25;
 const MAX_SPAN_DEG = 0.12;
-// Each street gets a few arrows whose positions are recomputed per frame on the CPU,
-// so cap how many streets we draw (thinned evenly across the view) to stay smooth.
-
 // --- Segment tiles (built by scripts/tile-segments.mjs; loaded per viewport) ---
 // Streets are split into a spatial grid so the phone downloads only what's in view
 // (~tens of KB) instead of the whole 21.7 MB city. Each segment is a lean tuple;
@@ -311,9 +286,8 @@ function writeStoredBikeType(t: BikeType): void {
 
 function MapApp() {
   const isMobile = useIsMobile();
-  // 30 fps on phones (now that 3D is off there's headroom for a livelier field),
-  // 60 on desktop.
-  const flowPhase = useFlowPhase(isMobile ? 1000 / 30 : 0);
+  const reducedMotion = useReducedMotion();
+  const deckRef = useRef<DeckGLRef | null>(null);
   const windowSize = useWindowSize();
 
   // A view can be named in the URL hash — #z=17.5&lat=55.673&lon=12.578&pitch=0 — so a
@@ -582,7 +556,7 @@ function MapApp() {
   // tiles stream in per viewport (see the tile-loading effect below).
   useEffect(() => {
     let cancelled = false;
-    fetch("/data/segtiles/index.json")
+    fetch(dataUrl("segtiles/index.json"))
       .then((r) => { if (!r.ok) throw new Error(`Tile index ${r.status}`); return r.json(); })
       .then((m) => {
         if (!cancelled) setTileManifest({ tileDeg: m.tileDeg, minLon: m.minLon, minLat: m.minLat, tiles: new Set<string>(m.tiles) });
@@ -597,11 +571,11 @@ function MapApp() {
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      fetch("/data/cph-roads.json")
+      fetch(dataUrl("cph-roads.json"))
         .then((r) => { if (!r.ok) throw new Error(`Roads ${r.status}`); return r.json(); })
         .then((r) => { if (!cancelled) setRoads(r); })
         .catch((e) => { if (!cancelled) console.warn("Roads failed to load:", e); });
-      fetch("/data/canyon-by-way.json")
+      fetch(dataUrl("canyon-by-way.json"))
         .then((r) => { if (!r.ok) throw new Error(`Canyon table ${r.status}`); return r.json(); })
         .then((t) => { if (!cancelled) setCanyonTable(t); })
         .catch((e) => { if (!cancelled) { console.warn("Canyon table failed to load; routing on the flat model:", e); setCanyonTable(false); } });
@@ -626,7 +600,7 @@ function MapApp() {
   useEffect(() => {
     if (!wantBuildings || buildingsReq.current) return;
     buildingsReq.current = true;
-    fetch("/data/cph-buildings-slim.json")
+    fetch(dataUrl("cph-buildings-slim.json"))
       .then((r) => { if (!r.ok) throw new Error(`Buildings ${r.status}`); return r.json(); })
       .then((b: BuildingRow[]) => setBuildings(b))
       .catch((e) => { console.warn("3D buildings failed to load:", e); buildingsReq.current = false; });
@@ -689,7 +663,7 @@ function MapApp() {
       if (!tileManifest.tiles.has(key)) continue;
       if (tileCache[key] || tileInflightRef.current.has(key)) continue;
       tileInflightRef.current.add(key);
-      fetch(`/data/segtiles/${key}.json`)
+      fetch(dataUrl(`segtiles/${key}.json`))
         .then((r) => { if (!r.ok) throw new Error(`Tile ${key} ${r.status}`); return r.json(); })
         .then((arr: SegTuple[]) => {
           setTileCache((prev) => ({ ...prev, [key]: arr.map(decodeSeg) }));
@@ -742,12 +716,16 @@ function MapApp() {
   }, [visibleSegments, viewState.zoom]);
 
   // A read-only probe for the screenshot harness (scripts/shots.mjs), so a run can
-  // assert "arrows were drawn at this view" instead of eyeballing a PNG. Nothing in
-  // the app reads it.
+  // assert "arrows were drawn at this view" instead of eyeballing a PNG. `arrows` counts
+  // the field the CPU built; `drawnArrows()` counts the arrows the GPU actually drew, read
+  // back from deck.gl's picking buffer, so an arrow shader that fails to compile reads 0.
+  // Nothing in the app reads it.
   useEffect(() => {
     (window as unknown as { __cphwind?: unknown }).__cphwind = {
       zoom: zoomQ,
       arrows: flowLines.length,
+      drawnArrows: () =>
+        deckRef.current?.pickObjects({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight, layerIds: ["wind-flow-arrows"] }).length ?? null,
       tiles: Object.keys(tileCache).length,
       windMs: activeWind?.speedMs ?? null,
       canyonEdges,
@@ -771,8 +749,8 @@ function MapApp() {
   }, []);
 
   // 3D building extrusions sit at the bottom of the stack. Memoised separately so
-  // they are NOT rebuilt on every animation frame (only when the visible set
-  // changes) — extruding ~thousands of footprints 60×/s would crush a phone.
+  // they are NOT rebuilt on every pan frame (only when the visible set changes);
+  // extruding thousands of footprints 60 times a second would crush a phone.
   const buildingLayers = useMemo(() => {
     if (!visibleBuildings || visibleBuildings.length === 0) return [];
     return [
@@ -844,14 +822,13 @@ function MapApp() {
     return result;
   }, [routing, rankedRoutes, selectedRoute, bestId, start, end]);
 
-  // Animated dashed flow streaks (oriented in the wind direction). Rebuilt per frame
-  // (flowPhase), but that only updates a single GPU time uniform — the path/color
-  // attributes are unchanged, so it's cheap. Also the pick target for the tooltip.
+  // The arrow field, and the pick target for the tooltip. Rebuilt only when the field or
+  // the interaction mode changes; the brightness wave runs in its shader (useRedrawLoop).
   const flowLineLayers = useMemo(() => {
     if (flowLines.length === 0) return [] as Layer[];
     return createFlowLineLayer({
       data: flowLines,
-      time: flowPhase,
+      animate: !reducedMotion,
       isMobile,
       // While planning a route, clicks set waypoints instead of pinning a street.
       onHover: isMobile || routing ? undefined : (info) => {
@@ -862,7 +839,11 @@ function MapApp() {
         return true;
       },
     });
-  }, [flowLines, flowPhase, isMobile, routing]);
+  }, [flowLines, reducedMotion, isMobile, routing]);
+
+  // The wave's frame clock: 30 redraws a second on phones, 60 on desktop, none while
+  // reduced motion is on or no arrows are drawn. Nothing in React re-renders for it.
+  useRedrawLoop(flowLineLayers[0], isMobile ? 30 : 60, !reducedMotion && flowLines.length > 0);
 
   // Bike lanes from the same OSM download the router uses: dedicated cycleways as a
   // solid green line, roads with a track or lane as a thinner one. From zoom 15, so the
@@ -940,7 +921,17 @@ function MapApp() {
         left: "calc(env(safe-area-inset-left) + 10px)",
         zIndex: 20,
       }
-    : { position: "absolute", bottom: 16, right: 16, zIndex: 20 };
+    // Desktop: 12 px above the bottom edge leaves the credit line its own row under it.
+    : { position: "absolute", bottom: 28, right: 16, zIndex: 20 };
+
+  // The map credit (OSM/CARTO) must stay on screen. Desktop: its own row under the
+  // legend. Phone: right-aligned on the legend's row (the legend pill sits left); while
+  // the route sheet owns the bottom, just under the top bar.
+  const attributionStyle: React.CSSProperties = isMobile
+    ? routing
+      ? { position: "absolute", top: "calc(env(safe-area-inset-top) + 62px)", right: "calc(env(safe-area-inset-right) + 10px)", zIndex: 19 }
+      : { position: "absolute", bottom: `calc(env(safe-area-inset-bottom) + ${showSlider ? 122 : 14}px)`, right: "calc(env(safe-area-inset-right) + 10px)", zIndex: 19 }
+    : { position: "absolute", bottom: 6, right: 16, zIndex: 19 };
 
   const sliderStyle: React.CSSProperties = isMobile
     ? {
@@ -958,6 +949,7 @@ function MapApp() {
   return (
     <div className="app-root" style={{ position: "relative", background: THEME.land, overflow: "hidden" }}>
       <DeckGL
+        ref={deckRef}
         initialViewState={initialViewState}
         viewState={viewState}
         onViewStateChange={onViewStateChange}
@@ -971,8 +963,9 @@ function MapApp() {
         <MapLibreMap
           reuseMaps
           mapStyle={MAP_STYLE}
-          // Hide the on-map credit line (it overlapped the wind scale on phones);
-          // full OSM / CARTO / MapLibre attribution lives in the About dialog.
+          // MapLibre's own control sits under the deck canvas and fought the wind scale on
+          // phones; the app draws the credit itself (components/Attribution) where the
+          // layout has room for it. The About dialog keeps the full list.
           attributionControl={false}
           onLoad={(e: { target: maplibregl.Map }) => applyDaylight(e.target)}
         />
@@ -1054,6 +1047,8 @@ function MapApp() {
           />
         </div>
       )}
+
+      <Attribution style={attributionStyle} short={isMobile} />
 
       {!stillLoading && <OnboardingHint isMobile={isMobile} />}
 

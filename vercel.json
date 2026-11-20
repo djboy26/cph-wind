@@ -10,5 +10,6 @@
         }
       ]
     }
-  ]
+  ],
+  "ignoreCommand": "sh scripts/vercel-ignore.sh"
 }

@@ -4,19 +4,23 @@ Live per-street wind for Copenhagen cyclists. React 19 + Vite + deck.gl + MapLib
 Wind from MET Norway Locationforecast through the `/api/wind` proxy (`api/wind.ts`); roads and
 buildings from OpenStreetMap.
 
-**Read `PLAN.md` before starting work.** It carries the current milestone, the diagnosis behind each
-change, and the regression tests each step must satisfy.
+**Read `plans/sprint-1.md` (the current sprint) and `docs/decisions.md` before starting work.** The
+sprint plan carries each item's diagnosis, its acceptance checks and whether it runs unattended or
+goes through a PR with a preview link. Milestone 1's full record is `docs/history/PLAN-M1.md`; read
+a step there only when the sprint plan points to it.
 
 ## Commands
 
 | do this | not this |
 |---|---|
-| `npm run check` — lint + `vitest run` | ❌ `npm test` — bare `vitest`, **watch mode, hangs forever** |
-| `npm run test:run` — one-shot tests | |
+| `npm run check` — lint + one-shot tests | ❌ `npm run test:watch` — watch mode, **hangs forever** |
+| `npm test` (or `npm run test:run`) — one-shot tests | |
 | `npm run build` — `tsc -b && vite build` | |
 | `npm run dev` | |
+| `npm run data:pull` — the locked map data, after a fresh clone (`build` and `dev` run it first anyway) | |
 
-`npm test` will appear to succeed and then block indefinitely waiting for file changes. Never call it.
+`npm run test:watch` blocks indefinitely waiting for file changes. Never call it from an agent.
+Node 24 everywhere (`.nvmrc`, `engines`, CI).
 
 ## Do not touch `src/math/index.ts` without reading this
 
@@ -29,12 +33,10 @@ bearing, **4.1 × 10⁻¹⁵ m/s** for resistance.
 - `headwindMs` is **positive for headwind**. This is the opposite of the usual physics convention and
   it is deliberate. Do not flip it.
 - Tests in `math/index.test.ts` pin all of this. If one fails, the change is wrong, not the test.
-  That rule is about the maths. A test that pins dead code goes when the code goes — `PLAN.md`
-  names the one such case.
+  That rule is about the maths. A test that pins dead code goes when the code goes.
 
-The one known defect in this file is documented as its own step in `PLAN.md`
-(`streetLevelWind()` is not applied inside `canyonModifiedWind()`). Fix it there, deliberately, with
-the tests that step specifies. Do not fix it opportunistically while doing something else.
+The defect once documented here (`streetLevelWind()` not applied inside `canyonModifiedWind()`)
+was fixed by Step 2a on 2026-09-03 (`docs/history/PLAN-M1.md`).
 
 ## Conventions
 
@@ -48,19 +50,34 @@ the tests that step specifies. Do not fix it opportunistically while doing somet
 
 ## Data pipeline
 
-Regenerating map data hits Overpass hard and takes minutes. Do not run it unless a step says to.
+The map data is pinned by `data.lock.json`: a version plus the size and SHA-256 of every file.
+The files live in Cloudflare R2 under `<version>/<path>`. `npm run build`, `npm run dev` and CI
+fetch them with `npm run data:pull`; `npm test` stops at once if `public/data/` does not match the
+lock. Until the Sprint 1 cutover (`plans/sprint-1.md`) the files are also still committed.
 
-```
-npm run data:rebuild    # fetch-osm -> fetch-buildings -> compute-cross-sections
-npm run data:validate
-```
+| command | what it does |
+|---|---|
+| `npm run data:pull` | fetch the locked app data into `public/data/`, only what is missing; never overwrites a local file that differs unless `-- --force` |
+| `npm run data:check` | verify `public/data/` against the lock, offline |
+| `npm run data:rebuild` | regenerate everything from Overpass. Slow and hits Overpass hard: do not run it unless a step says to |
+| `npm run data:validate` | sanity-check the cross-sections |
+| `npm run data:lock` | record locally rebuilt data in the lock, no upload |
+| `npm run data:publish` | upload the local data to R2 and record its version; reads credentials from `.r2.local` (never commit it) |
 
-Generated artefacts in `public/data/` are committed, except `cph-segments.json`, which is an intermediate that `tile-segments` and the validator read; regenerate it locally with `node scripts/compute-cross-sections.mjs`. `segtiles/` is the tiled form the app loads. `canyon-by-way.json` is the per-way canyon table the router joins on (Step 2b), rebuilt from the tiles by `npm run data:canyon`.
+After a rebuild: `data:rebuild`, `data:validate`, `data:publish`, then commit `data.lock.json`
+together with the code that needs that data.
+
+`public/data/` is exactly what the browser fetches, all through `dataUrl()` in `src/data/base.ts`.
+`segtiles/` is the tiled street data the app loads; `canyon-by-way.json` is the per-way canyon
+table the router joins on (Step 2b), rebuilt from the tiles by `npm run data:canyon`.
+`data/raw/` holds pipeline files that are never deployed: `cph-buildings.json` (published with
+each version so a build can be reproduced) and `cph-segments.json` (an intermediate that
+`tile-segments` and the validator read; regenerate it with `node scripts/compute-cross-sections.mjs`).
 
 ## Rendering: `npm run shots`, and nothing else
 
 You cannot look at this app from here, and you do not need to. The one sanctioned way to render
-it is the screenshot harness (`PLAN.md`, Step 7):
+it is the screenshot harness (`docs/history/PLAN-M1.md`, Step 7):
 
 ```
 npm run build && npm run shots -- <label>     # -> docs/renders/<label>/report.md + PNGs
@@ -88,16 +105,18 @@ Never write into another project's config to work around any of this.
 `<step>.patch` files at the repo root are the reviewer's hand-off: the implementation of a step,
 built and verified on the review side. Apply with `git apply --3way <step>.patch`, delete the
 file, run the checks, commit. They are gitignored and never committed. If one does not apply
-cleanly, do not resolve it by hand: `git checkout -- .`, record it in `PLAN.md`, stop.
+cleanly, do not resolve it by hand: `git checkout -- .`, record it in the sprint plan, stop.
 
 ## Working style
 
-- Commit at each step boundary in `PLAN.md`, with the step named in the message.
-- Record each step under its heading in `PLAN.md` (`### Completed <date> — commit <hash>`, test
+- Commit at each item boundary in the sprint plan, with the item named in the message.
+- Record each item under its heading in the sprint plan (`### Completed <date> — commit <hash>`, test
   count, the harness numbers) and commit that as `Record Step <n>`.
 - `npm run check` and `npm run build` must both pass before any commit.
 - A GitHub Action pushes `chore: wind-validation sample [skip ci]` to `main` every few hours. Rebase
-  rather than merge when it conflicts; it only touches data files.
+  rather than merge when it conflicts; it only touches data files. On `main`, Vercel skips
+  commits that touch only that log, docs or Markdown; every other branch always gets a preview
+  (`scripts/vercel-ignore.sh`, run by `ignoreCommand` in `vercel.json`).
 - Pushing to `main` deploys straight to production. Work on a branch and open a PR.
 - If a step cannot be completed, stop and report. Do not work around it. A half-applied change to the
   wind model is worse than no change, because the current state is at least self-consistent within

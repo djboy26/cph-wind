@@ -75,8 +75,9 @@ export async function fetchCurrentWind(
   lon: number,
   signal?: AbortSignal,
 ): Promise<CurrentWindResult> {
-  // Round coords: met.no requires ≤4 decimals and caches better with fewer.
-  const url = `${WIND_API_URL}?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`;
+  // Round coords to 2 decimals (~1.1 km), as the proxy does: met.no requires ≤4, and the
+  // CDN caches per request URL, so riders only share a cache entry if the client rounds too.
+  const url = `${WIND_API_URL}?lat=${lat.toFixed(2)}&lon=${lon.toFixed(2)}`;
 
   const response = await fetch(url, { signal });
 

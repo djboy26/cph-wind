@@ -75,11 +75,20 @@ describe('fetchCurrentWind', () => {
       json: async () => MOCK_RESPONSE,
     } as Response);
 
-    await fetchCurrentWind(55.68, 12.56);
+    await fetchCurrentWind(55.6761, 12.5683);
 
     const callUrl = vi.mocked(globalThis.fetch).mock.calls[0][0];
     expect(callUrl).toContain('/api/wind');
-    expect(callUrl).toContain('lat=55.6800');
-    expect(callUrl).toContain('lon=12.5600');
+    expect(callUrl).toContain('lat=55.68');
+    expect(callUrl).toContain('lon=12.57');
+    expect(String(callUrl)).not.toContain('55.676');
+  });
+
+  it('asks for the same URL from two points 300 m apart, so riders share a cache entry', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue({ ok: true, json: async () => MOCK_RESPONSE } as Response);
+    await fetchCurrentWind(55.6761, 12.5683);
+    await fetchCurrentWind(55.6779, 12.5701); // ~250 m north-east
+    const [a, b] = vi.mocked(globalThis.fetch).mock.calls.map((c) => String(c[0]));
+    expect(a).toBe(b);
   });
 });

@@ -4,14 +4,10 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/arrow.svg" />
 
-    <!-- Inter: clean Nordic grotesk for the UI. Preconnect + swap so it never blocks paint. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- Inter is bundled (src/main.tsx, @fontsource/inter): no request to Google's servers,
+         which EU courts have treated as a transfer of the visitor's IP address. -->
+    <!-- Page zoom stays allowed (WCAG 1.4.4); the map handles its own pinch gestures. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="Live per-street wind visualization for Copenhagen cyclists. Real-time wind direction and speed mapped onto every street, modified by urban canyon channeling around buildings." />
     <!-- Matches the light "Copenhagen Morning" land colour so the mobile browser chrome blends in. -->
     <meta name="theme-color" content="#f2ede2" />

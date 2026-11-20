@@ -2,7 +2,7 @@
 // Samples segments and flags cross-section outliers.
 import { readFile } from "node:fs/promises";
 
-const SEGMENTS_PATH = "public/data/cph-segments.json";
+const SEGMENTS_PATH = "data/raw/cph-segments.json";
 const SAMPLE_COUNT = 20;
 const MIN_WIDTH = 3;
 const MAX_WIDTH = 60;

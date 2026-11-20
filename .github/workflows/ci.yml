@@ -14,9 +14,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
+      # Map data is pinned by data.lock.json and fetched from R2 (two tests read it);
+      # cached per lock, so it downloads once per data version.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            public/data
+          key: data-${{ hashFiles('data.lock.json') }}
+      - run: npm run data:pull
       - run: npm run lint
-      - run: npm run test:run
+      - run: npm test
       - run: npm run build

@@ -5,7 +5,11 @@
 // the one property kept from the deleted buildWindArrows tests: arrows point in the
 // true wind vector, not along the street.
 import { describe, it, expect } from 'vitest';
-import { buildFlowField, pitchM, roadWidthM, rowOffsetsM } from './FlowLineLayer';
+import {
+  buildFlowField, pitchM, roadWidthM, rowOffsetsM,
+  arrowColor, createFlowLineLayer, waveCycle, waveFactor, WaveIconLayer,
+  WAVE_DEPTH, WAVE_GLSL, WAVE_RATE, type FlowLine,
+} from './FlowLineLayer';
 import type { RawSegment } from './buildWindArrows';
 import { offsetAlongBearing, type Wind } from '../math';
 
@@ -279,5 +283,97 @@ describe('buildFlowField — direction', () => {
     const field = buildFlowField([open()], { speedMs: 5, directionDeg: 300 }, MID);
     expect(field.length).toBeGreaterThan(0);
     for (const a of field) expect(Math.abs(a.flowDeg - 120)).toBeLessThan(0.5);
+  });
+});
+
+describe('the brightness wave runs in the shader (sprint 1)', () => {
+  // The per-arrow alpha the CPU computed every frame until sprint 1 (arrowAlpha, main@04049a9).
+  const cpuAlpha = (alpha: number, phase: number, t: number) =>
+    alpha * (1 - 0.15 + 0.15 * Math.sin(2 * Math.PI * (phase - t * 0.25)));
+
+  it('waveFactor is the old per-frame formula: base alpha × factor agrees over phase and time', () => {
+    const worst = (tOffset: number) => {
+      let w = 0;
+      for (let i = 0; i <= 40; i++) for (let j = 0; j <= 100; j++) {
+        const phase = i / 40, t = tOffset + j * 0.37, alpha = 0.75 + 0.025 * (i % 11);
+        w = Math.max(w, Math.abs(alpha * waveFactor(phase, t) - cpuAlpha(alpha, phase, t)));
+      }
+      return w;
+    };
+    // First minute: identical to rounding.
+    expect(worst(0)).toBeLessThan(1e-13);
+    // A day open: the old formula's own sin argument (~1.4e5 rad) carries ~1e-11 rad of
+    // rounding that waveCycle avoids, so the two differ by a few 1e-12 there, the old one
+    // being the less exact.
+    expect(worst(86_000)).toBeLessThan(1e-10);
+  });
+
+  it('the injected GLSL computes waveFactor (its right-hand side evaluated on the same inputs)', () => {
+    expect(WAVE_GLSL.startsWith('vColor.a *= ')).toBe(true);
+    const rhs = WAVE_GLSL.slice('vColor.a *= '.length, -1);
+    const glsl = new Function('wave', 'instancePhases', 'sin', `return ${rhs};`) as
+      (wave: { cycle: number; depth: number }, instancePhases: number, sin: (x: number) => number) => number;
+    for (const phase of [0, 0.1, 0.25, 0.5, 0.9]) for (const t of [0, 0.5, 1.7, 3.99, 86_400.25]) {
+      const cycle = waveCycle(t);
+      expect(glsl({ cycle, depth: WAVE_DEPTH }, phase, Math.sin)).toBeCloseTo(waveFactor(phase, t), 12);
+      expect(glsl({ cycle, depth: 0 }, phase, Math.sin)).toBe(1); // reduced motion: base opacity exactly
+    }
+  });
+
+  it('the clock reaches the shader as one cycle, in [0, 1): a day open keeps sin() inside ±2π', () => {
+    for (const t of [0, 1, 3.999, 4, 59.5, 86_400, 86_400 * 30 + 0.123]) {
+      const c = waveCycle(t);
+      expect(c).toBeGreaterThanOrEqual(0);
+      expect(c).toBeLessThan(1);
+      expect(c).toBeCloseTo(((t * WAVE_RATE) % 1 + 1) % 1, 9);
+    }
+    expect(waveCycle(4)).toBe(0); // one 4 s period
+  });
+
+  it('the wave stays inside ±WAVE_DEPTH of the base opacity, and the floor clears the old 0.55', () => {
+    for (let k = 0; k < 1000; k++) {
+      const f = waveFactor(k / 1000, k * 0.013);
+      expect(f).toBeGreaterThanOrEqual(1 - 2 * WAVE_DEPTH - 1e-12);
+      expect(f).toBeLessThanOrEqual(1 + 1e-12);
+    }
+    // Calmest arrow at the wave's trough: 0.75 × 0.70 = 0.525 of full opacity, as before sprint 1.
+    expect(0.75 * (1 - 2 * WAVE_DEPTH)).toBeCloseTo(0.525, 12);
+  });
+
+  it('per-arrow colour is static: shelter colour plus base opacity, no time in it', () => {
+    const a = buildFlowField([open()], wind, MID)[0];
+    expect(arrowColor(a)).toEqual([a.color[0], a.color[1], a.color[2], Math.round(255 * a.alpha)]);
+    expect(arrowColor(a)).toEqual(arrowColor({ ...a })); // same input, same output, at any time
+  });
+
+  it('the layer carries no time-based update trigger and passes the phase and animate flag through', () => {
+    const data = buildFlowField([open()], wind, MID);
+    for (const animate of [true, false]) {
+      const [layer] = createFlowLineLayer({ data, animate, isMobile: false });
+      expect(layer).toBeInstanceOf(WaveIconLayer);
+      const props = layer.props as unknown as {
+        updateTriggers: Record<string, unknown>; animate: boolean;
+        getPhase: (d: FlowLine) => number; getColor: (d: FlowLine) => number[];
+      };
+      expect(props.updateTriggers).toEqual({});
+      expect(props.animate).toBe(animate);
+      expect(props.getPhase(data[0])).toBe(data[0].phase);
+      expect(props.getColor(data[0])).toEqual(arrowColor(data[0]));
+    }
+  });
+
+  it('the shaders keep the IconLayer modules and add the wave uniforms, the phase attribute and the alpha line', () => {
+    const [layer] = createFlowLineLayer({ data: [], animate: true, isMobile: false });
+    // getShaders() reads the default modules from the layer context, which only exists
+    // once deck.gl has mounted the layer; an empty one stands in for it here.
+    (layer as unknown as { context: unknown }).context = { defaultShaderModules: [] };
+    const shaders = (layer as WaveIconLayer).getShaders() as {
+      modules: { name: string; uniformTypes?: Record<string, string> }[]; inject: Record<string, string>;
+    };
+    const names = shaders.modules.map((m) => m.name);
+    expect(names).toEqual(expect.arrayContaining(['project32', 'picking', 'icon', 'wave']));
+    expect(shaders.modules.find((m) => m.name === 'wave')?.uniformTypes).toEqual({ cycle: 'f32', depth: 'f32' });
+    expect(shaders.inject['vs:#decl']).toBe('in float instancePhases;');
+    expect(shaders.inject['vs:#main-end']).toBe(WAVE_GLSL);
   });
 });
