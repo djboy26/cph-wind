@@ -9,7 +9,7 @@
 //   • daylight    — dark hours are shaded (a moon flags "you'll need lights")
 //   • best window — a tappable marker on the calmest/driest upcoming hour
 
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import type { ForecastStep } from "../api/weather";
 import type { RideWindow } from "../cyclist/bestWindow";
 import { isDark } from "../cyclist/solar";
@@ -46,6 +46,8 @@ function hhmm(time: string): string {
 }
 
 function TimeSlider({ steps, index, onChange, isMobile, lat, lon, rideWindow }: Props) {
+  // Dark hours (lights on), once per forecast rather than on every render.
+  const dark = useMemo(() => steps.map((s) => isDark(new Date(s.time), lat, lon)), [steps, lat, lon]);
   if (steps.length < 2) return null;
   const n = steps.length;
   const i = Math.max(0, Math.min(index, n - 1));
@@ -55,7 +57,6 @@ function TimeSlider({ steps, index, onChange, isMobile, lat, lon, rideWindow }: 
   const temp = cur.conditions.tempC;
   const rain = cur.conditions.precipMm ?? 0;
   const isNow = i === 0;
-  const dark = steps.map((s) => isDark(new Date(s.time), lat, lon));
   const curDark = dark[i];
 
   // Position (0–1) of a step under the slider thumb's travel.
@@ -63,25 +64,25 @@ function TimeSlider({ steps, index, onChange, isMobile, lat, lon, rideWindow }: 
 
   return (
     <div style={{ ...glass, padding: isMobile ? "9px 13px 7px" : "10px 15px 8px", width: isMobile ? "auto" : 340 }}>
-      {/* Data never wraps or clips; the label yields first (shrinks, then ellipsises).
-          At "11.0 m/s · gust 16 · 15°" the label used to break onto two lines and
-          "m/s" dropped under its number. */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-        <span style={{ ...labelStyle, ...nowrap, flexShrink: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>Wind forecast</span>
-        <span style={{ ...NUM, ...nowrap, flexShrink: 0, fontSize: 12.5, color: COLORS.dim, display: "flex", gap: 8, alignItems: "baseline" }}>
-          <span style={{ ...nowrap, color: isNow ? COLORS.accentInk : COLORS.text, fontWeight: 700 }}>{stepLabel(steps, i)}</span>
-          <span style={nowrap}>
-            <span style={{ ...nowrap, fontWeight: 700, color: COLORS.text }}>{spd.toFixed(1)}</span> m/s
-          </span>
-          {gust != null && gust - spd >= 2 && <span style={{ ...nowrap, color: COLORS.faint }}>gust {gust.toFixed(0)}</span>}
-          {temp != null && <span style={{ ...nowrap, color: COLORS.text }}>{Math.round(temp)}°</span>}
-          {rain > 0 && <span style={{ ...nowrap, color: COLORS.accentInk }}>{rain.toFixed(1)}mm</span>}
-          {curDark && (
-            <span style={{ ...nowrap, display: "inline-flex", alignItems: "center", gap: 3, color: COLORS.faint }}>
-              <Icon name="moon" size={11} color={COLORS.faint} /> lights
-            </span>
-          )}
+      {/* Two rows, so nothing is ever cut: the title and the hour, then the numbers. On
+          one row the title gave way to the numbers and read "WIND FORECA…" whenever the
+          gust, the rain and the lights were all shown. The numbers may wrap, never clip. */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 3 }}>
+        <span style={{ ...labelStyle, ...nowrap }}>Wind forecast</span>
+        <span style={{ ...NUM, ...nowrap, fontSize: 12, color: isNow ? COLORS.accentInk : COLORS.text, fontWeight: 700 }}>{stepLabel(steps, i)}</span>
+      </div>
+      <div style={{ ...NUM, display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 10, rowGap: 2, marginBottom: 7, fontSize: 12.5, color: COLORS.dim }}>
+        <span style={nowrap}>
+          <span style={{ ...nowrap, fontSize: 16, fontWeight: 700, letterSpacing: -0.2, color: COLORS.text }}>{spd.toFixed(1)}</span> m/s
         </span>
+        {gust != null && gust - spd >= 2 && <span style={{ ...nowrap, color: COLORS.faint }}>gust {gust.toFixed(0)}</span>}
+        {temp != null && <span style={{ ...nowrap, color: COLORS.text }}>{Math.round(temp)}°</span>}
+        {rain > 0 && <span style={{ ...nowrap, color: COLORS.accentInk }}>{rain.toFixed(1)}mm</span>}
+        {curDark && (
+          <span style={{ ...nowrap, display: "inline-flex", alignItems: "center", gap: 3, color: COLORS.faint }}>
+            <Icon name="moon" size={11} color={COLORS.faint} /> lights
+          </span>
+        )}
       </div>
 
       {/* Rain profile + daylight shading. Cells map 1:1 to slider steps. */}

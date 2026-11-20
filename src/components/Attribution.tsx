@@ -17,7 +17,8 @@ function Attribution({ style, short = false }: { style?: CSSProperties; short?: 
       style={{
         fontFamily: FONT,
         fontSize: 11,
-        lineHeight: "16px",
+        lineHeight: short ? "14px" : "16px",
+        textAlign: "right",
         color: COLORS.dim,
         background: "rgba(247,242,233,0.82)",
         padding: "0 6px",
@@ -29,7 +30,8 @@ function Attribution({ style, short = false }: { style?: CSSProperties; short?: 
     >
       © <a style={link} href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>
       {short ? "" : " contributors"} · © <a style={link} href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a>
-      {short ? "" : <> · <a style={link} href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a></>}
+      {/* OpenFreeMap's own credit line names it too; on a phone it takes a second line. */}
+      {short ? <br /> : " · "}<a style={link} href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a>
     </div>
   );
 }

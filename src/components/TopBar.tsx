@@ -58,8 +58,10 @@ function TopBar({ wind, tempC, timestamp, loading, routingActive, onPlanRoute, o
           {loading || !wind ? "—" : wind.speedMs.toFixed(1)}
           <span style={{ fontSize: 10.5, color: COLORS.dim, marginLeft: 3, fontWeight: 500 }}>m/s</span>
         </div>
-        <div style={{ fontSize: 10.5, color: COLORS.faint, marginTop: 2, display: "flex", flexWrap: "wrap", gap: 4 }}>
-          <span>{wind ? `from ${compassPoint(deg)}` : "loading"}</span>
+        {/* One line: on a phone "from WSW · 21:00" broke after "WSW"; the dial already
+            shows the direction, so phones drop "from". */}
+        <div style={{ fontSize: 10.5, color: COLORS.faint, marginTop: 2, display: "flex", gap: 4, whiteSpace: "nowrap" }}>
+          <span>{wind ? `${isMobile ? "" : "from "}${compassPoint(deg)}` : "loading"}</span>
           {timestampLabel && <span>· {timestampLabel}</span>}
         </div>
       </div>
