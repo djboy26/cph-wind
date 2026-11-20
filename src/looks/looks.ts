@@ -27,6 +27,11 @@ export interface Look {
     land: string; water: string; park: string; road: string; roadCasing: string;
     building: string; boundary: string; ink: string; halo: string;
     parkOpacity: number; buildingOpacity: number;
+    /**
+     * Residential blocks, piers and airport areas (Positron paints them a light grey that
+     * suits a light map). Left alone when absent, so Morning stays exactly as it was.
+     */
+    landuse?: string;
   };
   /** CSS custom properties for the panels (components/ui.ts reads them through var()). */
   ui: Record<string, string>;
@@ -99,7 +104,7 @@ export const LOOKS: Record<LookId, Look> = {
     map: {
       land: "#12171e", water: "#0d2a33", park: "#14261c", road: "#2b333d", roadCasing: "#1b2129",
       building: "#1d242d", boundary: "#34404c", ink: "#a9b4c1", halo: "#0d1116",
-      parkOpacity: 0.9, buildingOpacity: 0.85,
+      parkOpacity: 0.9, buildingOpacity: 0.85, landuse: "#181e26",
     },
     ui: {
       ...MORNING_UI,
@@ -147,7 +152,7 @@ export const LOOKS: Record<LookId, Look> = {
     map: {
       land: "#f6f5f1", water: "#d6dfe4", park: "#e3e8da", road: "#ffffff", roadCasing: "#d5d1c9",
       building: "#e8e6e0", boundary: "#c8c2b6", ink: "#2a2a2a", halo: "#f6f5f1",
-      parkOpacity: 0.9, buildingOpacity: 0.7,
+      parkOpacity: 0.9, buildingOpacity: 0.7, landuse: "#eeede8",
     },
     ui: {
       ...MORNING_UI,
@@ -194,7 +199,7 @@ export const LOOKS: Record<LookId, Look> = {
     map: {
       land: "#f3ede3", water: "#78c1c4", park: "#b9d69b", road: "#fffaf1", roadCasing: "#e9d8bd",
       building: "#f0e1cb", boundary: "#d8c4a3", ink: "#383845", halo: "#fbf6ec",
-      parkOpacity: 0.85, buildingOpacity: 0.65,
+      parkOpacity: 0.85, buildingOpacity: 0.65, landuse: "#eee5d6",
     },
     ui: {
       ...MORNING_UI,
@@ -267,6 +272,8 @@ export function applyLookToMap(map: maplibregl.Map, look: Look): void {
         set("fill-color", m.building); set("fill-opacity", m.buildingOpacity); continue;
       }
       if (id.includes("boundary") && l.type === "line") { set("line-color", m.boundary); continue; }
+      if (m.landuse && /(landuse|aeroway|pier)/.test(id) && l.type === "fill") { set("fill-color", m.landuse); continue; }
+      if (m.landuse && id.includes("aeroway") && l.type === "line") { set("line-color", m.road); continue; }
       if (/(road|street|bridge|tunnel|transit|rail|highway|path)/.test(id) && l.type === "line") {
         set("line-color", id.includes("casing") || id.includes("outline") ? m.roadCasing : m.road);
         continue;

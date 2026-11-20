@@ -58,6 +58,11 @@ describe('looks', () => {
     }
   });
 
+  it('repaints the light landuse blocks in every look but Morning, which stays as it was', () => {
+    expect(LOOKS.morning.map.landuse).toBeUndefined();
+    for (const id of LOOK_IDS.filter((x) => x !== 'morning')) expect(LOOKS[id].map.landuse, id).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
   it('reads the look from the URL hash, defaulting to Morning', () => {
     expect(lookFromHash('#look=night').id).toBe('night');
     expect(lookFromHash('#z=16&look=ink&lat=55.6').id).toBe('ink');
