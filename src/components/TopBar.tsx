@@ -3,6 +3,7 @@
 // "Plan route" is a filled accent button (the one obvious call-to-action); on
 // mobile the live-wind block doubles as the brand so the CTA has room to be labelled.
 
+import { memo } from "react";
 import type { Wind } from "../math";
 import { feelsLikeC } from "../cyclist/feelsLike";
 import { glass, COLORS, NUM, FONT } from "./ui";
@@ -37,7 +38,7 @@ function WindDial({ deg, size = 30 }: { deg: number; size?: number }) {
   );
 }
 
-export default function TopBar({ wind, tempC, timestamp, loading, routingActive, onPlanRoute, onAbout, isMobile }: Props) {
+function TopBar({ wind, tempC, timestamp, loading, routingActive, onPlanRoute, onAbout, isMobile }: Props) {
   const deg = wind?.directionDeg ?? 0;
   const timestampLabel = timestamp
     ? new Date(timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
@@ -57,8 +58,10 @@ export default function TopBar({ wind, tempC, timestamp, loading, routingActive,
           {loading || !wind ? "—" : wind.speedMs.toFixed(1)}
           <span style={{ fontSize: 10.5, color: COLORS.dim, marginLeft: 3, fontWeight: 500 }}>m/s</span>
         </div>
-        <div style={{ fontSize: 10.5, color: COLORS.faint, marginTop: 2, display: "flex", flexWrap: "wrap", gap: 4 }}>
-          <span>{wind ? `from ${compassPoint(deg)}` : "loading"}</span>
+        {/* One line: on a phone "from WSW · 21:00" broke after "WSW"; the dial already
+            shows the direction, so phones drop "from". */}
+        <div style={{ fontSize: 10.5, color: COLORS.faint, marginTop: 2, display: "flex", gap: 4, whiteSpace: "nowrap" }}>
+          <span>{wind ? `${isMobile ? "" : "from "}${compassPoint(deg)}` : "loading"}</span>
           {timestampLabel && <span>· {timestampLabel}</span>}
         </div>
       </div>
@@ -152,3 +155,6 @@ export default function TopBar({ wind, tempC, timestamp, loading, routingActive,
     </header>
   );
 }
+
+// Memoised: the map re-renders the app on every pan frame; this only re-renders when its props change.
+export default memo(TopBar);

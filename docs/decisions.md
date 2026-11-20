@@ -73,3 +73,28 @@ browsers straight from R2 (Milestone 2, W1) is a change to `dataUrl()`, a CORS r
 custom domain from D2. The history keeps the old copies (about 32 MiB packed on DJ's laptop);
 rewriting it is not worth a force-push. Supersedes `plans/M2-world.md`'s "Copenhagen's data
 stays in the repo".
+
+## D5. Basemap: OpenFreeMap's Positron now, self-hosting later (2026-11-20)
+
+**Context.** D2 put self-hosted Protomaps on R2 in sprint 2. R2 is not set up yet (D4's cutover
+waits on it too), and CARTO is tightening its terms. Its FAQ (docs.carto.com/faqs/carto-basemaps,
+read 2026-11-20) says raster tiles have needed a key since 25 September 2026 and that keyed
+commercial use "keeps working as it is until 30 November 2026". The vector style this app loads
+needs no key "today", which CARTO can change at any time.
+
+**Options.** Wait for R2 and Protomaps; OpenFreeMap's hosted Positron now; stay on CARTO.
+
+**Decision.** OpenFreeMap's Positron (`https://tiles.openfreemap.org/styles/positron`), DJ's
+choice on 2026-11-20. Its terms (openfreemap.org, read 2026-11-20): free, "no registration, no
+user database, no API keys, and no cookies", "no limits on the number of map views or
+requests", commercial use "Yes", attribution required, no SLA. Self-hosting stays the plan for
+the world (Milestone 2); this replaces only D2's timing.
+
+**Consequences.** The style uses the OpenMapTiles layer names, so `applyDaylight` in
+`src/App.tsx` recolours it without new rules: background, 2 water layers, 4 park and wood
+layers, buildings, 3 boundaries, 15 roads and 4 casings, 19 label layers. The casings
+(`*_casing`) now take the warm-bone colour; CARTO's `*_case` layers were left white. The credit
+reads "© OpenStreetMap contributors · © OpenMapTiles · OpenFreeMap"
+(`src/components/Attribution.tsx`, the About dialog). The screenshot harness counts basemap
+requests to `tiles.openfreemap.org`. With no SLA, an outage leaves the arrows drawing on the
+app's own land colour, as they do when CARTO fails today.

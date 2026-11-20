@@ -1,7 +1,7 @@
 // src/components/OnboardingHint.tsx
 // One-time tip shown on first visit, dismissed to localStorage.
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { glass, pillActive, COLORS } from "./ui";
 import { Icon, type IconName } from "./Icon";
 
@@ -17,7 +17,7 @@ const TIPS: { icon: IconName; text: string }[] = [
   { icon: "route", text: "Plan a route and compare it by wind" },
 ];
 
-export default function OnboardingHint({ isMobile }: { isMobile: boolean }) {
+function OnboardingHint({ isMobile }: { isMobile: boolean }) {
   const [show, setShow] = useState(() => !seenBefore());
 
   if (!show) return null;
@@ -74,3 +74,6 @@ export default function OnboardingHint({ isMobile }: { isMobile: boolean }) {
     </div>
   );
 }
+
+// Memoised: the map re-renders the app on every pan frame; this only re-renders when its props change.
+export default memo(OnboardingHint);

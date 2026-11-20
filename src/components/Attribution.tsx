@@ -1,13 +1,15 @@
 // src/components/Attribution.tsx
-// Map credits, always on screen. OpenStreetMap's ODbL attribution guidelines and the
-// basemap provider's terms ask for the credit on the map itself; the About dialog keeps
-// the full list. Update the basemap credit when the basemap changes (Protomaps, sprint 2).
+// Map credits, always on screen. OpenStreetMap's attribution guidelines and OpenFreeMap's
+// terms ask for the credit on the map itself: "© OpenMapTiles" and the OpenStreetMap data
+// credit, each linked. The About dialog keeps the full list. Update this when the basemap
+// changes (docs/decisions.md D5).
+import { memo } from "react";
 import type { CSSProperties } from "react";
 import { COLORS, FONT } from "./ui";
 
 const link: CSSProperties = { color: "inherit", textDecoration: "none" };
 
-export default function Attribution({ style, short = false }: { style?: CSSProperties; short?: boolean }) {
+function Attribution({ style, short = false }: { style?: CSSProperties; short?: boolean }) {
   return (
     <div
       role="contentinfo"
@@ -15,7 +17,8 @@ export default function Attribution({ style, short = false }: { style?: CSSPrope
       style={{
         fontFamily: FONT,
         fontSize: 11,
-        lineHeight: "16px",
+        lineHeight: short ? "14px" : "16px",
+        textAlign: "right",
         color: COLORS.dim,
         background: "rgba(247,242,233,0.82)",
         padding: "0 6px",
@@ -26,7 +29,12 @@ export default function Attribution({ style, short = false }: { style?: CSSPrope
       }}
     >
       © <a style={link} href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>
-      {short ? "" : " contributors"} · © <a style={link} href="https://carto.com/attributions" target="_blank" rel="noreferrer">CARTO</a>
+      {short ? "" : " contributors"} · © <a style={link} href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a>
+      {/* OpenFreeMap's own credit line names it too; on a phone it takes a second line. */}
+      {short ? <br /> : " · "}<a style={link} href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a>
     </div>
   );
 }
+
+// Memoised: the map re-renders the app on every pan frame; this only re-renders when its props change.
+export default memo(Attribution);

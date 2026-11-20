@@ -4,7 +4,7 @@
 //
 // Serves dist/ on a local port, opens it in headless Chromium (Playwright) with the
 // wind mocked to a fixture, and writes PNGs plus a report.md to docs/renders/<label>/.
-// The basemap loads from CARTO as in production, so the pictures are what a person
+// The basemap loads from OpenFreeMap as in production, so the pictures are what a person
 // would see. Every view is fixed by URL hash (#z=…&lat=…&lon=…), so two runs of the
 // same commit differ only in what the code draws.
 //
@@ -31,6 +31,8 @@ const outDir = join(root, "docs", "renders", label);
 await mkdir(outDir, { recursive: true });
 
 const ONBOARDED_KEY = "cphwind.onboarded.v1"; // OnboardingHint.tsx
+// Every basemap request (style, TileJSON, tiles, glyphs, sprite) goes to this host: MAP_STYLE in src/App.tsx.
+const BASEMAP_HOST = /tiles\.openfreemap\.org/;
 
 // Views. H.C. Andersens Boulevard at Rådhuspladsen for the street shots — a wide
 // arterial with cycle tracks both sides, in the centre so its tiles always exist.
@@ -73,15 +75,47 @@ async function openPage(wind, vp, mobile, { onboarded = true, reducedMotion = fa
   await ctx.route("**/api/wind**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(metFixture(wind)) }));
   await ctx.route(/photon\.komoot\.io|sentry|vercel-insights|vercel-analytics/, (r) => r.abort());
   const page = await ctx.newPage();
-  const basemap = { ok: 0, failed: 0 };
-  page.on("response", (r) => { if (/cartocdn\.com/.test(r.url())) basemap[r.ok() ? "ok" : "failed"]++; });
-  page.on("requestfailed", (r) => { if (/cartocdn\.com/.test(r.url())) basemap.failed++; });
+  const basemap = { ok: 0, failed: 0, inflight: 0, last: Date.now() };
+  const isBasemap = (r) => BASEMAP_HOST.test(r.url());
+  page.on("request", (r) => { if (isBasemap(r)) { basemap.inflight++; basemap.last = Date.now(); } });
+  page.on("requestfinished", (r) => { if (isBasemap(r)) { basemap.inflight--; basemap.last = Date.now(); } });
+  page.on("response", (r) => { if (isBasemap(r)) basemap[r.ok() ? "ok" : "failed"]++; });
+  page.on("requestfailed", (r) => { if (isBasemap(r)) { basemap.failed++; basemap.inflight--; basemap.last = Date.now(); } });
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (m) => { if (m.type() === "error" && !/insights|_vercel|Failed to load resource/.test(m.text())) errors.push(`console: ${m.text().slice(0, 200)}`); });
   return { ctx, page, basemap };
 }
 
 const probe = (page) => page.evaluate(() => window.__cphwind ?? null);
+
+/**
+ * Wait until every building chunk the view wants is in (probe.buildingsPending, 0 on a
+ * phone or below zoom 14), at most `ms`. The buildings are parsed in a worker while the
+ * page sits still, so a fixed wait or a "two equal frames" test can end before they land.
+ */
+async function buildingsIn(page, ms = 30_000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    const p = await probe(page);
+    if (p && (p.buildingsPending ?? 0) === 0) return true;
+    await page.waitForTimeout(250);
+  }
+  return false;
+}
+
+/**
+ * Wait until the basemap has had nothing in flight for 1.5 s (style, tiles, glyphs,
+ * sprites), at most `ms`. A fixed wait was not enough on a cold tile cache: the first
+ * city shot of sprint 2 came out with no basemap at all after 5 requests.
+ */
+async function basemapSettled(basemap, ms = 20_000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    if (basemap.inflight <= 0 && Date.now() - basemap.last >= 1500) return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+}
 
 /**
  * Screenshot through CDP rather than page.screenshot(): Playwright's wrapper waits on
@@ -125,7 +159,9 @@ for (const wind of WINDS) {
     const { ctx, page, basemap } = await openPage(wind, v.vp, v.mobile);
     await page.goto(`${base}/#${v.hash}`, { waitUntil: "networkidle", timeout: 90_000 });
     const p = await waitForArrows(page, v.arrows);
-    await page.waitForTimeout(2500); // basemap tiles and the building layer stream in after the field
+    await buildingsIn(page);
+    await basemapSettled(basemap);
+    await page.waitForTimeout(1500); // the last tiles and chunks drawn
     await snap(page, join(outDir, `${v.name}-${wind.tag}.png`));
     record(`${v.name}-${wind.tag}`, p, basemap, v.arrows, await drawnArrows(page));
     await ctx.close();
@@ -152,6 +188,9 @@ for (const reduced of [true, false]) {
   const { ctx, page, basemap } = await openPage(WINDS[0], [1440, 900], false, { reducedMotion: reduced });
   await page.goto(`${base}/#z=17.5&lat=${HCA.lat}&lon=${HCA.lon}&pitch=0`, { waitUntil: "networkidle", timeout: 90_000 });
   await waitForArrows(page, 200);
+  // Everything that streams in must be in first, or "at rest" can mean "still waiting".
+  await buildingsIn(page);
+  await basemapSettled(basemap);
   let a;
   if (reduced) {
     const t0 = Date.now();
@@ -232,7 +271,7 @@ const lines = [
   `# Renders: ${label}`,
   "",
   `Generated ${new Date().toISOString()} by \`npm run shots -- ${label}\`.`,
-  `Basemap: ${anyBasemap ? "loaded from CARTO" : "NOT loaded (no tile responses — offline machine?); pictures show the app's own layers only"}.`,
+  `Basemap: ${anyBasemap ? "loaded from OpenFreeMap" : "NOT loaded (no tile responses — offline machine?); pictures show the app's own layers only"}.`,
   `Result: ${failed || fatal.length ? "FAIL" : "PASS"}.`,
   "",
   "`arrows` is the field the CPU built for the view, padding included; `drawn` is how many of them the GPU drew on screen.",

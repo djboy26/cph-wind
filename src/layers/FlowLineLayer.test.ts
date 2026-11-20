@@ -6,7 +6,7 @@
 // true wind vector, not along the street.
 import { describe, it, expect } from 'vitest';
 import {
-  buildFlowField, pitchM, roadWidthM, rowOffsetsM,
+  buildFlowField, buildLattice, colourLattice, arrowSizePx, pitchM, roadWidthM, rowOffsetsM,
   arrowColor, createFlowLineLayer, waveCycle, waveFactor, WaveIconLayer,
   WAVE_DEPTH, WAVE_GLSL, WAVE_RATE, type FlowLine,
 } from './FlowLineLayer';
@@ -375,5 +375,47 @@ describe('the brightness wave runs in the shader (sprint 1)', () => {
     expect(shaders.modules.find((m) => m.name === 'wave')?.uniformTypes).toEqual({ cycle: 'f32', depth: 'f32' });
     expect(shaders.inject['vs:#decl']).toBe('in float instancePhases;');
     expect(shaders.inject['vs:#main-end']).toBe(WAVE_GLSL);
+  });
+});
+
+describe('buildLattice and colourLattice — placing once, colouring per wind', () => {
+  const grid = (): RawSegment[] => {
+    const out: RawSegment[] = [];
+    for (let i = 0; i < 5; i++) {
+      const at = offsetAlongBearing({ lon: 12.5683, lat: 55.6761 }, 90, i * 14);
+      out.push(open({ wayId: 300 + i, classRank: i % 4, bearingDeg: 0, lon: at.lon, lat: at.lat, startM: 7 * i }));
+      const at2 = offsetAlongBearing({ lon: 12.5683, lat: 55.6761 }, 0, i * 14);
+      out.push(open({ wayId: 40 + i, classRank: (i + 1) % 4, bearingDeg: 90, lon: at2.lon, lat: at2.lat }));
+    }
+    return out;
+  };
+
+  it('together give exactly buildFlowField', () => {
+    for (const z of [CLOSE, STREET, MID]) {
+      const p = pitchM(z.mpp);
+      expect(colourLattice(buildLattice(grid(), p), wind, p, arrowSizePx())).toEqual(buildFlowField(grid(), wind, z));
+    }
+  });
+
+  it('a new wind moves no arrow: same lattice points, only direction, colour and phase change', () => {
+    const p = pitchM(CLOSE.mpp);
+    const lattice = buildLattice(grid(), p);
+    const a = colourLattice(lattice, wind, p, arrowSizePx());
+    const b = colourLattice(lattice, { speedMs: 11, directionDeg: 95 }, p, arrowSizePx());
+    expect(b.map((x) => [x.lon, x.lat, x.baseAlongM, x.baseCrossM])).toEqual(a.map((x) => [x.lon, x.lat, x.baseAlongM, x.baseCrossM]));
+    expect(b.map((x) => x.flowDeg)).not.toEqual(a.map((x) => x.flowDeg));
+  });
+
+  it('orders contention the same on the packed-key path and the comparison fallback', () => {
+    // A piece with a negative startM cannot be packed into the sort key, so its presence
+    // sends the whole sort down the four-way comparison. Far away, it contends with nothing.
+    const far = offsetAlongBearing({ lon: 12.5683, lat: 55.6761 }, 45, 3000);
+    const odd = open({ wayId: 999, startM: -40, lon: far.lon, lat: far.lat });
+    for (const z of [CLOSE, STREET]) {
+      const p = pitchM(z.mpp);
+      const packed = buildLattice(grid(), p);
+      const compared = buildLattice([...grid(), odd], p).filter((c) => c.raw.wayId !== 999);
+      expect(compared.map((c) => [c.raw.wayId, c.alongM, c.crossM])).toEqual(packed.map((c) => [c.raw.wayId, c.alongM, c.crossM]));
+    }
   });
 });

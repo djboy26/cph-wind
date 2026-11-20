@@ -22,7 +22,8 @@
     "data:check": "node scripts/data-pull.mjs --check",
     "data:lock": "node scripts/data-publish.mjs --lock-only",
     "data:publish": "node --env-file-if-exists=.r2.local scripts/data-publish.mjs",
-    "shots": "node scripts/shots.mjs"
+    "shots": "node scripts/shots.mjs",
+    "perf": "node scripts/perf.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "~9.3.2",

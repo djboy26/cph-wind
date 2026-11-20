@@ -18,7 +18,10 @@ import { useRedrawLoop } from "./hooks/useRedrawLoop";
 import { reverseGeocode } from "./api/geocode";
 import { arrowDensityForZoom, type RawSegment } from "./layers/buildWindArrows";
 import { offsetAlongBearing, type GeometrySource } from "./math";
-import { buildFlowField, createFlowLineLayer, roadWidthM, type FlowLine } from "./layers/FlowLineLayer";
+import { arrowSizePx, buildLattice, colourLattice, createFlowLineLayer, pitchM, roadWidthM, type FlowLine } from "./layers/FlowLineLayer";
+import { boxForBounds, boxKey } from "./layers/viewBox";
+import { chunkKeysForBox, type BuildingRow } from "./buildings/chunks";
+import { createBuildingsClient, type BuildingsClient } from "./buildings/client";
 import { rankRoutes, routeMetrics, type RouteOption, type RankCriterion } from "./routing/windRoute";
 import type { OutMsg } from "./routing/routingWorker";
 import type { CanyonByWay } from "./routing/graph";
@@ -51,9 +54,6 @@ const statusChip = (color: string): React.CSSProperties => ({
 
 interface LatLon { lat: number; lon: number; }
 
-// One row of the slim buildings file: [heightM, outerRing as [lon,lat] pairs].
-type BuildingRow = [number, [number, number][]];
-
 interface HoverState {
   x: number;
   y: number;
@@ -61,9 +61,10 @@ interface HoverState {
 }
 
 const COPENHAGEN = { lat: 55.6761, lon: 12.5683 };
-// "Daylight" — a clean light basemap, then recoloured at runtime (applyDaylight)
-// into the warm "Copenhagen Morning" palette (see THEME).
-const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+// "Daylight": OpenFreeMap's Positron, a clean light basemap (free, no key, no request limits,
+// commercial use allowed; docs/decisions.md D5), recoloured at runtime (applyDaylight) into
+// the warm "Copenhagen Morning" palette (see THEME). The credit is components/Attribution.
+const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const MOBILE_BREAKPOINT = 768;
 
 // "Copenhagen Morning" palette — warm linen land, harbour-tinted teal water,
@@ -82,10 +83,17 @@ const THEME = {
   halo: "#f7f2e9",
 };
 const BUILDING_RGB: [number, number, number] = [235, 228, 212]; // matches THEME.building
+// Module-level, so every chunk layer gets the same accessor and material objects.
+const BUILDING_FILL: [number, number, number, number] = [...BUILDING_RGB, 244];
+const BUILDING_MATERIAL = { ambient: 0.72, diffuse: 0.55, shininess: 8, specularColor: [60, 58, 52] as [number, number, number] };
+const buildingRing = (d: BuildingRow) => d[1];
+const buildingHeight = (d: BuildingRow) => d[0];
+const NO_BUILDINGS: BuildingRow[] = [];
 
-// Recolour the light basemap into the Daylight palette. Carto's gl styles use
-// well-named layers, so we classify by id/type and repaint role by role — robust
-// to the exact layer set, and far less code than authoring a full style.json.
+// Recolour the light basemap into the Daylight palette. OpenMapTiles styles use
+// well-named layers (water, park, landcover_wood, building, boundary_*, highway_*,
+// *_casing), so we classify by id/type and repaint role by role — robust to the exact
+// layer set, and far less code than authoring a full style.json.
 function applyDaylight(map: maplibregl.Map) {
   const layers = map.getStyle()?.layers ?? [];
   for (const l of layers) {
@@ -226,11 +234,8 @@ class ErrorBoundary extends Component<{ children: ReactNode; silent?: boolean },
   }
 }
 
-// Snap raw bounds to a coarse grid so arrows only rebuild when the view moves a
-// meaningful amount, not on every pan frame.
-const SNAP_DEG = 0.004;
-const BOUNDS_PAD = 0.25;
-const MAX_SPAN_DEG = 0.12;
+// Decoded segment tiles land in one state update at most this often (see the tile effect).
+const TILE_BATCH_MS = 80;
 // --- Segment tiles (built by scripts/tile-segments.mjs; loaded per viewport) ---
 // Streets are split into a spatial grid so the phone downloads only what's in view
 // (~tens of KB) instead of the whole 21.7 MB city. Each segment is a lean tuple;
@@ -340,8 +345,14 @@ function MapApp() {
   const [tileManifest, setTileManifest] = useState<TileManifest | null>(null);
   const [tileCache, setTileCache] = useState<Record<string, RawSegment[]>>({});
   const tileInflightRef = useRef<Set<string>>(new Set());
-  const [buildings, setBuildings] = useState<BuildingRow[] | null>(null);
-  const buildingsReq = useRef(false);
+  // Tiles decoded but not yet in tileCache, and the timer that moves them in.
+  const tileBatchRef = useRef<Record<string, RawSegment[]>>({});
+  const tileFlushRef = useRef<number | null>(null);
+  // 3D buildings by chunk (buildings/chunks.ts), as the worker answers.
+  const [buildingChunks, setBuildingChunks] = useState<ReadonlyMap<string, BuildingRow[]>>(() => new Map());
+  const buildingsRef = useRef<BuildingsClient | null>(null);
+  const buildingsInflight = useRef<Set<string>>(new Set());
+  const [chunkQueue, setChunkQueue] = useState<readonly (readonly [string, BuildingRow[]])[]>([]);
   const [dataError, setDataError] = useState<Error | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
   const [pinned, setPinned] = useState<HoverState | null>(null);
@@ -593,18 +604,10 @@ function MapApp() {
     };
   }, []);
 
-  // Lazily pull the ~42 MB 3D-buildings file the first time the rider zooms in far
-  // enough to see extrusions — never on first paint, so the map opens fast. Phones
-  // skip 3D entirely (the fetch + per-frame extrusion is the main mobile cost).
+  // 3D buildings: the ~42 MB file is pulled the first time the rider zooms in far
+  // enough to see extrusions, never on first paint, so the map opens fast. Phones skip
+  // 3D entirely (the download and the extrusion are the main mobile cost).
   const wantBuildings = !isMobile && (viewState.zoom ?? 0) >= BUILDINGS_MIN_ZOOM;
-  useEffect(() => {
-    if (!wantBuildings || buildingsReq.current) return;
-    buildingsReq.current = true;
-    fetch(dataUrl("cph-buildings-slim.json"))
-      .then((r) => { if (!r.ok) throw new Error(`Buildings ${r.status}`); return r.json(); })
-      .then((b: BuildingRow[]) => setBuildings(b))
-      .catch((e) => { console.warn("3D buildings failed to load:", e); buildingsReq.current = false; });
-  }, [wantBuildings]);
 
   const wayNames = useMemo(() => {
     if (!roads) return new Map<string, string>();
@@ -621,8 +624,8 @@ function MapApp() {
   // Quantised so the field rebuilds a few times per zoom level, not per frame.
   const zoomQ = Math.round(zoom * 4) / 4;
 
-  // Padded, snapped viewport box (as a stable string key). Recomputed every frame
-  // but only changes value when the view moves across a snap cell.
+  // The box the field, the tiles and the buildings cover (layers/viewBox.ts), as a stable
+  // string key. Recomputed every frame; changes about every quarter screen of pan.
   const boundsKey = useMemo(() => {
     if (density === "hidden") return null;
     const vp = new WebMercatorViewport({
@@ -634,44 +637,43 @@ function MapApp() {
       pitch: viewState.pitch ?? 0,
       bearing: viewState.bearing ?? 0,
     });
-    let [west, south, east, north] = vp.getBounds();
-    const padX = (east - west) * BOUNDS_PAD;
-    const padY = (north - south) * BOUNDS_PAD;
-    west -= padX; east += padX; south -= padY; north += padY;
-    // Clamp span — a steep pitch can stretch bounds toward the horizon.
-    if (east - west > MAX_SPAN_DEG) {
-      const cx = (east + west) / 2;
-      west = cx - MAX_SPAN_DEG / 2; east = cx + MAX_SPAN_DEG / 2;
-    }
-    if (north - south > MAX_SPAN_DEG) {
-      const cy = (north + south) / 2;
-      south = cy - MAX_SPAN_DEG / 2; north = cy + MAX_SPAN_DEG / 2;
-    }
-    west = Math.floor(west / SNAP_DEG) * SNAP_DEG;
-    south = Math.floor(south / SNAP_DEG) * SNAP_DEG;
-    east = Math.ceil(east / SNAP_DEG) * SNAP_DEG;
-    north = Math.ceil(north / SNAP_DEG) * SNAP_DEG;
-    return `${west.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${north.toFixed(4)}`;
+    return boxKey(boxForBounds(vp.getBounds() as [number, number, number, number]));
   }, [density, windowSize.width, windowSize.height, viewState.longitude, viewState.latitude, viewState.zoom, viewState.pitch, viewState.bearing]);
 
   // Fetch the segment tiles covering the current viewport (skip empty/loaded/in-flight
-  // ones), decode them, and update tileCache so the wind field rebuilds as they land.
+  // ones), decode them, and move them into tileCache so the wind field rebuilds as they
+  // land. Every move rebuilds the field (up to ~30 ms at the city view), so tiles that
+  // land close together move in one update: at once when the last one in flight lands,
+  // otherwise TILE_BATCH_MS after the first. A view's ~28 tiles cost a few rebuilds,
+  // not 28.
+  const flushTiles = useCallback(() => {
+    if (tileFlushRef.current != null) { window.clearTimeout(tileFlushRef.current); tileFlushRef.current = null; }
+    const batch = tileBatchRef.current;
+    tileBatchRef.current = {};
+    if (Object.keys(batch).length > 0) setTileCache((prev) => ({ ...prev, ...batch }));
+  }, []);
+  useEffect(() => () => { if (tileFlushRef.current != null) window.clearTimeout(tileFlushRef.current); }, []);
   useEffect(() => {
     if (!tileManifest || !boundsKey) return;
     const [west, south, east, north] = boundsKey.split(",").map(Number);
+    const landed = () => {
+      if (tileInflightRef.current.size === 0) flushTiles();
+      else if (tileFlushRef.current == null) tileFlushRef.current = window.setTimeout(flushTiles, TILE_BATCH_MS);
+    };
     for (const key of tileKeysForBounds(tileManifest, west, south, east, north)) {
       if (!tileManifest.tiles.has(key)) continue;
-      if (tileCache[key] || tileInflightRef.current.has(key)) continue;
+      if (tileCache[key] || tileBatchRef.current[key] || tileInflightRef.current.has(key)) continue;
       tileInflightRef.current.add(key);
       fetch(dataUrl(`segtiles/${key}.json`))
         .then((r) => { if (!r.ok) throw new Error(`Tile ${key} ${r.status}`); return r.json(); })
         .then((arr: SegTuple[]) => {
-          setTileCache((prev) => ({ ...prev, [key]: arr.map(decodeSeg) }));
+          tileBatchRef.current[key] = arr.map(decodeSeg);
           tileInflightRef.current.delete(key);
+          landed();
         })
-        .catch((e) => { tileInflightRef.current.delete(key); console.warn("Tile load failed:", e); });
+        .catch((e) => { tileInflightRef.current.delete(key); console.warn("Tile load failed:", e); landed(); });
     }
-  }, [tileManifest, boundsKey, tileCache]);
+  }, [tileManifest, boundsKey, tileCache, flushTiles]);
 
   // The street pieces inside the (padded) viewport, from the loaded tiles. Feeds the
   // arrow field and the road band; recomputed when the view moves a tile-snap or a
@@ -690,18 +692,34 @@ function MapApp() {
     return visible;
   }, [tileManifest, boundsKey, tileCache]);
 
-  const flowLines = useMemo<FlowLine[]>(() => {
-    if (!activeWind || density === "hidden" || visibleSegments.length === 0) return [];
-    // deck.gl / MapLibre zoom is on 512 px tiles: m/px = 2*pi*R*cos(lat) / (512 * 2^z).
-    const mpp = (78271.517 * Math.cos(viewState.latitude * Math.PI / 180)) / Math.pow(2, zoomQ);
-    return buildFlowField(visibleSegments, activeWind, { mpp, isMobile });
-  }, [visibleSegments, activeWind, density, zoomQ, viewState.latitude, isMobile]);
+  // The lattice pitch in whole metres at the quantised zoom. deck.gl / MapLibre zoom is
+  // on 512 px tiles: m/px = 2*pi*R*cos(lat) / (512 * 2^z), taken at the middle of the
+  // snapped box, so the pitch changes with the box, not with every pan frame (the
+  // view's own latitude moves every frame and used to rebuild the field each time).
+  const pitch = useMemo(() => {
+    if (!boundsKey) return 0;
+    const [, south, , north] = boundsKey.split(",").map(Number);
+    const mpp = (78271.517 * Math.cos(((south + north) / 2) * Math.PI / 180)) / Math.pow(2, zoomQ);
+    return pitchM(mpp, isMobile);
+  }, [boundsKey, zoomQ, isMobile]);
+
+  // Where the arrows go: the streets in the box and the pitch, never the wind
+  // (FlowLineLayer buildLattice). Moving the time slider only recolours it.
+  const lattice = useMemo(
+    () => (density === "hidden" ? [] : buildLattice(visibleSegments, pitch)),
+    [visibleSegments, pitch, density],
+  );
+  const flowLines = useMemo<FlowLine[]>(
+    () => (!activeWind || lattice.length === 0 ? [] : colourLattice(lattice, activeWind, pitch, arrowSizePx(isMobile))),
+    [lattice, activeWind, pitch, isMobile],
+  );
 
   // The road band under the arrows (see ROAD_BAND_MIN_ZOOM): one path per 30 m piece,
   // in metres, the same width the lattice fills, with a casing so it reads as a road
   // on the basemap's land colour. Rounded joins hide the piece boundaries.
+  const showRoadBand = zoom >= ROAD_BAND_MIN_ZOOM;
   const roadBandLayers = useMemo(() => {
-    if ((viewState.zoom ?? 0) < ROAD_BAND_MIN_ZOOM || visibleSegments.length === 0) return [] as Layer[];
+    if (!showRoadBand || visibleSegments.length === 0) return [] as Layer[];
     const pieces = visibleSegments.map((s) => {
       const half = (s.segmentLengthM ?? 30) / 2;
       const a = offsetAlongBearing({ lon: s.lon, lat: s.lat }, s.bearingDeg, -half);
@@ -713,12 +731,73 @@ function MapApp() {
       new PathLayer<{ path: [number, number][]; widthM: number }>({ ...common, id: "road-casing", getColor: ROAD_CASING_RGBA, getWidth: (d) => d.widthM + 2 * ROAD_CASING_M }),
       new PathLayer<{ path: [number, number][]; widthM: number }>({ ...common, id: "road-band", getColor: ROAD_BAND_RGBA, getWidth: (d) => d.widthM }),
     ];
-  }, [visibleSegments, viewState.zoom]);
+  }, [visibleSegments, showRoadBand]);
+
+  // Only extrude the buildings near the view — 220k city-wide footprints would choke
+  // the GPU: the 0.02° chunks under the padded box (buildings/chunks.ts). The worker
+  // parses the file and answers per chunk; each chunk keeps its own layer, so a pan
+  // extrudes only the chunks that come into view.
+  const buildingKeys = useMemo(() => {
+    if (!wantBuildings || !boundsKey) return [] as string[];
+    const [west, south, east, north] = boundsKey.split(",").map(Number);
+    return chunkKeysForBox(west, south, east, north);
+  }, [wantBuildings, boundsKey]);
+  useEffect(() => {
+    if (buildingKeys.length === 0) return;
+    if (!buildingsRef.current) {
+      buildingsRef.current = createBuildingsClient(new URL(dataUrl("cph-buildings-slim.json"), window.location.href).href);
+    }
+    const client = buildingsRef.current;
+    for (const key of buildingKeys) {
+      if (buildingChunks.has(key) || buildingsInflight.current.has(key)) continue;
+      buildingsInflight.current.add(key);
+      client.chunk(key).then(
+        (rows) => { setChunkQueue((q) => [...q, [key, rows]]); }, // still "in flight" until it joins the map
+
+        (e) => {
+          buildingsInflight.current.delete(key);
+          // The file did not load: drop this worker; the next zoom past 14 starts a new one.
+          if (buildingsRef.current === client) { console.warn("3D buildings failed to load:", e); client.terminate(); buildingsRef.current = null; }
+        },
+      );
+    }
+  }, [buildingKeys, buildingChunks]);
+  useEffect(() => () => buildingsRef.current?.terminate(), []);
+
+  // Chunks join the map one per frame. The worker answers a whole view's chunks at once
+  // (15 or so at zoom 14), and extruding them in one go was one long freeze.
+  useEffect(() => {
+    if (chunkQueue.length === 0) return;
+    const id = requestAnimationFrame(() => {
+      const [key, rows] = chunkQueue[0];
+      buildingsInflight.current.delete(key);
+      setBuildingChunks((prev) => new Map(prev).set(key, rows));
+      setChunkQueue((q) => q.slice(1));
+    });
+    return () => cancelAnimationFrame(id);
+  }, [chunkQueue]);
+
+  // Compile the 3D-building shaders while the map sits idle after it first draws, not
+  // in the middle of the first zoom past 14: an empty layer with the chunks' settings
+  // (desktop only; phones draw no buildings).
+  const [warmBuildings, setWarmBuildings] = useState(false);
+  useEffect(() => {
+    if (isMobile || warmBuildings || !tileManifest || Object.keys(tileCache).length === 0) return;
+    const win = window as unknown as {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const warm = () => setWarmBuildings(true);
+    const id = win.requestIdleCallback ? win.requestIdleCallback(warm, { timeout: 4000 }) : window.setTimeout(warm, 2500);
+    return () => { if (win.requestIdleCallback && win.cancelIdleCallback) win.cancelIdleCallback(id); else window.clearTimeout(id); };
+  }, [isMobile, warmBuildings, tileManifest, tileCache]);
 
   // A read-only probe for the screenshot harness (scripts/shots.mjs), so a run can
   // assert "arrows were drawn at this view" instead of eyeballing a PNG. `arrows` counts
   // the field the CPU built; `drawnArrows()` counts the arrows the GPU actually drew, read
   // back from deck.gl's picking buffer, so an arrow shader that fails to compile reads 0.
+  // `buildingsPending` counts the building chunks wanted but not in yet: the worker parses
+  // while the page sits still, so the harness waits for 0 before it judges the map at rest.
   // Nothing in the app reads it.
   useEffect(() => {
     (window as unknown as { __cphwind?: unknown }).__cphwind = {
@@ -729,45 +808,39 @@ function MapApp() {
       tiles: Object.keys(tileCache).length,
       windMs: activeWind?.speedMs ?? null,
       canyonEdges,
+      buildingChunks: buildingKeys.filter((k) => buildingChunks.has(k)).length,
+      buildingsPending: buildingKeys.filter((k) => !buildingChunks.has(k)).length,
     };
-  }, [zoomQ, flowLines, tileCache, activeWind, canyonEdges]);
-
-  // Only extrude the buildings inside the (padded) viewport box — 220k city-wide
-  // footprints would choke the GPU. boundsKey already snaps to a coarse grid, so
-  // this re-filters only when the view moves a meaningful amount.
-  const visibleBuildings = useMemo(() => {
-    if (!buildings || !boundsKey || (viewState.zoom ?? 0) < BUILDINGS_MIN_ZOOM) return null;
-    const [west, south, east, north] = boundsKey.split(",").map(Number);
-    return buildings.filter((b) => {
-      const [lon, lat] = b[1][0];
-      return lon >= west && lon <= east && lat >= south && lat <= north;
-    });
-  }, [buildings, boundsKey, viewState.zoom]);
+  }, [zoomQ, flowLines, tileCache, activeWind, canyonEdges, buildingKeys, buildingChunks]);
 
   const onViewStateChange = useCallback(({ viewState: vs }: { viewState: Record<string, unknown> }) => {
     setViewState(constrainView(vs as typeof viewState));
   }, []);
 
-  // 3D building extrusions sit at the bottom of the stack. Memoised separately so
-  // they are NOT rebuilt on every pan frame (only when the visible set changes);
-  // extruding thousands of footprints 60 times a second would crush a phone.
+  // 3D building extrusions sit at the bottom of the stack, one layer per chunk. A
+  // chunk's rows keep their identity, so deck.gl extrudes a chunk once and reuses it
+  // while it stays near the view; only a chunk that arrives is new work.
   const buildingLayers = useMemo(() => {
-    if (!visibleBuildings || visibleBuildings.length === 0) return [];
-    return [
+    const chunk = (id: string, data: BuildingRow[]) =>
       new PolygonLayer<BuildingRow>({
-        id: "buildings",
-        data: visibleBuildings,
+        id,
+        data,
         extruded: true,
-        getPolygon: (d) => d[1],
-        getElevation: (d) => d[0],
-        getFillColor: [...BUILDING_RGB, 244],
+        getPolygon: buildingRing,
+        getElevation: buildingHeight,
+        getFillColor: BUILDING_FILL,
         stroked: false,
         // Matte, warmly-lit ivory — soft daylight shading, no harsh speculars.
-        material: { ambient: 0.72, diffuse: 0.55, shininess: 8, specularColor: [60, 58, 52] },
+        material: BUILDING_MATERIAL,
         pickable: false,
-      }),
-    ];
-  }, [visibleBuildings]);
+      });
+    const layers: Layer[] = warmBuildings ? [chunk("buildings-warmup", NO_BUILDINGS)] : [];
+    for (const key of buildingKeys) {
+      const rows = buildingChunks.get(key);
+      if (rows && rows.length > 0) layers.push(chunk(`buildings-${key}`, rows));
+    }
+    return layers;
+  }, [buildingKeys, buildingChunks, warmBuildings]);
 
   // Routes + endpoints draw on TOP of the wind arrows. Also kept off the per-frame
   // path so the route polylines aren't rebuilt while arrows animate.
@@ -847,13 +920,19 @@ function MapApp() {
 
   // Bike lanes from the same OSM download the router uses: dedicated cycleways as a
   // solid green line, roads with a track or lane as a thinner one. From zoom 15, so the
-  // city view is not a green mesh. Static; rebuilt only when the roads file lands.
-  const bikeLaneLayers = useMemo(() => {
-    if (!roads || (viewState.zoom ?? 0) < BIKE_LANES_MIN_ZOOM) return [] as Layer[];
-    const lanes = roads.features.filter((f) => {
+  // city view is not a green mesh. Built once when the roads file lands and then only
+  // shown or hidden (deck.gl's `visible`), so crossing zoom 15 re-uploads nothing.
+  const bikeLanes = useMemo(() => {
+    if (!roads) return [] as Feature[];
+    return roads.features.filter((f) => {
       const p = f.properties as { highway?: string | null; cycleway?: string | null };
       return p.highway === "cycleway" || BIKE_LANE_TAGS.has(p.cycleway ?? "");
     });
+  }, [roads]);
+  const showBikeLanes = zoom >= BIKE_LANES_MIN_ZOOM;
+  const bikeLaneLayers = useMemo(() => {
+    if (bikeLanes.length === 0) return [] as Layer[];
+    const lanes = bikeLanes;
     return [
       new PathLayer<Feature>({
         id: "bike-lanes",
@@ -865,9 +944,10 @@ function MapApp() {
         capRounded: true,
         jointRounded: true,
         pickable: false,
+        visible: showBikeLanes,
       }),
     ];
-  }, [roads, viewState.zoom]);
+  }, [bikeLanes, showBikeLanes]);
 
   const layers = useMemo(
     () => [...buildingLayers, ...roadBandLayers, ...bikeLaneLayers, ...flowLineLayers, ...routeLayers],
@@ -880,6 +960,20 @@ function MapApp() {
   const showWindError = windError && !windResult;
   const showDataError = dataError && stillLoading;
   const activeTip = pinned ?? hover;
+
+  // The forecast panel's height, for what sits above it on a phone (see legendStyle).
+  const sliderRef = useRef<HTMLDivElement | null>(null);
+  const [sliderH, setSliderH] = useState(132);
+  useEffect(() => {
+    const el = sliderRef.current;
+    if (!el || !isMobile || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setSliderH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isMobile, stillLoading, forecast.length, routing]);
+
+  const openAbout = useCallback(() => setAboutOpen(true), []);
+  const closeAbout = useCallback(() => setAboutOpen(false), []);
 
   const onMapClick = useCallback((info: PickingInfo) => {
     if (routing && info.coordinate) {
@@ -913,25 +1007,29 @@ function MapApp() {
   // hidden while a route sheet owns the bottom on mobile.
   const showSlider = !stillLoading && forecast.length > 1 && !(routing && isMobile);
 
+  // Phone: the legend pill and the credit sit 8 px above the forecast panel, measured, not
+  // assumed: the panel grew a row in sprint 2 and covered them, and its numbers can wrap
+  // onto another line on a narrow phone.
+  const aboveSlider = 10 + sliderH + 8;
   const legendStyle: React.CSSProperties = isMobile
     ? {
         position: "absolute",
         // Sit clear above the (full-width) forecast strip when it's shown.
-        bottom: pinned ? 200 : `calc(env(safe-area-inset-bottom) + ${showSlider ? 118 : 10}px)`,
+        bottom: pinned ? 200 : `calc(env(safe-area-inset-bottom) + ${showSlider ? aboveSlider : 10}px)`,
         left: "calc(env(safe-area-inset-left) + 10px)",
         zIndex: 20,
       }
     // Desktop: 12 px above the bottom edge leaves the credit line its own row under it.
     : { position: "absolute", bottom: 28, right: 16, zIndex: 20 };
 
-  // The map credit (OSM/CARTO) must stay on screen. Desktop: its own row under the
+  // The map credit (OpenStreetMap, OpenMapTiles) must stay on screen. Desktop: its own row under the
   // legend. Phone: right-aligned on the legend's row (the legend pill sits left); while
   // the route sheet owns the bottom, just under the top bar.
-  const attributionStyle: React.CSSProperties = isMobile
+  const attributionStyle = useMemo<React.CSSProperties>(() => (isMobile
     ? routing
       ? { position: "absolute", top: "calc(env(safe-area-inset-top) + 62px)", right: "calc(env(safe-area-inset-right) + 10px)", zIndex: 19 }
-      : { position: "absolute", bottom: `calc(env(safe-area-inset-bottom) + ${showSlider ? 122 : 14}px)`, right: "calc(env(safe-area-inset-right) + 10px)", zIndex: 19 }
-    : { position: "absolute", bottom: 6, right: 16, zIndex: 19 };
+      : { position: "absolute", bottom: `calc(env(safe-area-inset-bottom) + ${showSlider ? aboveSlider + 4 : 14}px)`, right: "calc(env(safe-area-inset-right) + 10px)", zIndex: 19 }
+    : { position: "absolute", bottom: 6, right: 16, zIndex: 19 }), [isMobile, routing, showSlider, aboveSlider]);
 
   const sliderStyle: React.CSSProperties = isMobile
     ? {
@@ -978,7 +1076,7 @@ function MapApp() {
         loading={windLoading && !windResult}
         routingActive={routing}
         onPlanRoute={toggleRouting}
-        onAbout={() => setAboutOpen(true)}
+        onAbout={openAbout}
         isMobile={isMobile}
       />
 
@@ -1035,7 +1133,7 @@ function MapApp() {
       )}
 
       {showSlider && (
-        <div className="ui-up" style={sliderStyle}>
+        <div ref={sliderRef} className="ui-up" style={sliderStyle}>
           <TimeSlider
             steps={forecast}
             index={forecastIdx}
@@ -1074,7 +1172,7 @@ function MapApp() {
         />
       )}
 
-      <About open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <About open={aboutOpen} onClose={closeAbout} />
     </div>
   );
 }
